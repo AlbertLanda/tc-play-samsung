@@ -1,3 +1,73 @@
-# TC Play Samsung
+# TC Play para Samsung Tizen
 
-Aplicación independiente para televisores Samsung con Tizen. Este repositorio contiene el cliente de TV; consume las API existentes de Telecable.
+Proyecto independiente en `AlbertLanda/tc-play-samsung`. El código de la app está en la raíz de este repositorio. Consume las API existentes de Telecable; el backend, Android y LG se mantienen en sus proyectos correspondientes.
+
+## Funciones incluidas
+
+- Login con la API existente, categorías y canales.
+- Navegación con flechas, OK, Return (10009), CH+ y CH−.
+- Catálogo paginado de 12 canales para reducir nodos en televisores con pocos recursos.
+- Reproducción HLS (`m3u8`) con Samsung AVPlay: preparación asíncrona, miniatura y pantalla completa; coordenadas convertidas al plano de 1920×1080.
+- URL directa de Xtream: no llama a `proxy-url`, `stop-proxy` ni FFmpeg.
+- Cancelación de respuestas y callbacks nativos antiguos al cambiar canal/categoría y al cerrar sesión.
+- Límite de espera para inicio/buffering, reintento manual y liberación del reproductor al ocultar/salir de la app.
+- Credenciales únicamente en memoria; no se guardan en localStorage ni en archivos. Se requiere login al reiniciar la app.
+
+## Clonar una copia independiente
+
+Si ya tienes una carpeta `tc-play-samsung` creada mediante worktree del repositorio Android, conserva esa carpeta y clona este repositorio en otra ruta. No cambies el remoto del worktree, porque esa configuración se comparte con el repositorio original.
+
+```powershell
+Set-Location C:\Users\aalrp\Proyectos
+git clone https://github.com/AlbertLanda/tc-play-samsung.git tc-play-samsung-app
+Set-Location tc-play-samsung-app
+```
+
+## Preparar en Windows
+
+Requiere Node.js 18 o posterior. Desde PowerShell:
+
+```powershell
+Set-Location C:\Users\aalrp\Proyectos\tc-play-samsung-app
+npm ci
+Copy-Item config.example.json config.local.json
+```
+
+Edita `config.local.json` y coloca la URL del backend de pruebas aprobado en `apiBaseUrl`, sin `/api/xtream/`. Por ejemplo, `https://tu-backend-de-pruebas`. No pongas usuario ni contraseña en este archivo. Su valor inicial vacío evita conectar automáticamente con el servidor usado por clientes. No sobrescribas este archivo si ya está configurado.
+
+```powershell
+npm test
+npm run build
+npm start
+```
+
+La vista de desarrollo está en `http://localhost:4173`. Permite revisar interfaz y solicitudes; AVPlay se encuentra únicamente en el entorno Samsung. En navegador de PC la reproducción muestra un error porque no existe ese API. `npm run build` prepara `dist/`; no firma ni genera todavía el WGT.
+
+## Empaquetar para el televisor
+
+Instala Tizen Studio, la extensión Samsung TV y crea un certificado de desarrollo para el dispositivo. El SDK debe estar en PATH. Desde la raíz del proyecto:
+
+```powershell
+tizen build-web -- dist
+tizen package -t wgt -s TU_PERFIL_DE_CERTIFICADO -- dist/.buildResult
+```
+
+Sustituye `TU_PERFIL_DE_CERTIFICADO` por el perfil creado en Certificate Manager. Si el SDK requiere metadata de proyecto, crea un Basic Project con perfil Samsung TV en Tizen Studio y copia el contenido de `dist/` al proyecto conservando `.project` y `.tproject` del SDK. La biblioteca AVPlay se carga desde `$WEBAPIS/webapis/webapis.js` del televisor.
+
+El manifiesto contiene identificadores de prueba (`TcPlayTV01.TCPlay`) y `required_version=2.3`, como punto de partida de desarrollo; **no demuestra funcionamiento en todas las versiones desde 2.3**. Revisar los identificadores al registrar la app. La política de red permite los hosts de origen variables de Xtream para la prueba; antes de distribución debe ajustarse a los dominios reales y revisarse CSP y demás requisitos de tienda.
+
+## Compatibilidad y validación pendiente
+
+El código que corre en TV tiene sintaxis ES5 y no requiere React, módulos ES, fetch, Promise ni Media Source Extensions. La familia objetivo es Samsung Tizen; no incluye televisores anteriores con plataforma Orsay.
+
+Se necesita medir en televisores antiguos y recientes: teclado virtual, foco, Return, canales, audio/video, buffering, retorno desde Home, tamaño del plano de video y salida. Probar HLS real de Xtream y acceso directo desde la red del cliente; redirecciones, TLS, codecs y características del manifiesto pueden variar por modelo. No se convierte un stream incompatible a través de proxy: se muestra un error y permite reintentar.
+
+Las pruebas automatizadas verifican API simulada, carreras de solicitudes, navegación de la interfaz en jsdom y AVPlay simulado. No hubo conexión a Xtream, ejecución en SDK/TV real ni generación/firma de WGT en este entorno. No es una entrega lista para tienda. Favoritos, EPG, VOD, sesión persistente y mejoras finales de diseño quedan para siguientes entregas.
+
+## Referencias oficiales
+
+- [Crear apps para Samsung TV](https://developer.samsung.com/smarttv/develop/getting-started/creating-tv-applications.html)
+- [AVPlay](https://developer.samsung.com/smarttv/develop/guides/multimedia/media-playback/using-avplay.html)
+- [Control remoto](https://developer.samsung.com/smarttv/develop/guides/user-interaction/remote-control.html)
+- [CLI y firma WGT](https://developer.samsung.com/smarttv/develop/getting-started/using-sdk/command-line-interface.html)
+- [Manifiesto y permisos](https://developer.samsung.com/smarttv/develop/guides/fundamentals/configuring-tv-applications.html)

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TC Play</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- PLATFORM_SCRIPTS -->
+</head>
+<body>
+  <div id="media-slot"><video id="video" playsinline></video></div>
+  <main id="app">
+    <header><img src="assets/logo.png" alt="TC Play"><span id="platform-label"></span></header>
+    <section id="login-screen">
+      <div class="intro"><p class="eyebrow">TELECABLE · TELEVISIÓN EN VIVO</p><h1>Tu televisión,<br>en un solo lugar.</h1><p>Ingresa con tu cuenta de Telecable y disfruta tus canales.</p></div>
+      <form id="login-form" class="card">
+        <h2>Bienvenido a TC Play</h2>
+        <label for="username">Usuario</label><input id="username" name="username" autocomplete="username" maxlength="128" required>
+        <label for="password">Contraseña</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+        <button id="login-button" type="submit">Ingresar</button>
+        <p id="login-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+    <section id="home-screen" class="hidden">
+      <nav id="toolbar"><button id="logout">Cerrar sesión</button></nav>
+      <div class="catalogue">
+        <aside><h2>Categorías</h2><div id="categories"></div></aside>
+        <section class="channel-column"><h2 id="category-title">Canales</h2><div id="channels"></div><div class="pagination"><button id="previous-page">Anterior</button><span id="page-label"></span><button id="next-page">Siguiente</button></div><p id="catalogue-status" role="status" aria-live="polite"></p><button id="reload">Volver a cargar</button></section>
+        <section class="preview-column"><div id="preview-anchor"><button id="fullscreen" aria-label="Abrir canal en pantalla completa">Pantalla completa</button></div><h2 id="channel-title">Elige un canal</h2><p id="playback-status" role="status" aria-live="polite">Selecciona un canal y presiona OK para reproducir.</p><button id="retry">Reintentar canal</button><p class="hint">Flechas para navegar · OK para elegir · Atrás para volver</p></section>
+      </div>
+    </section>
+  </main>
+  <div id="player-overlay" class="hidden"><strong id="fullscreen-title"></strong><span>Atrás: canales · CH +/−: cambiar canal</span><button id="leave-fullscreen">Volver a canales</button><span id="fullscreen-status" role="status"></span></div>
+  <div id="exit-dialog" class="hidden" role="dialog" aria-modal="true" aria-labelledby="exit-title"><div class="card"><h2 id="exit-title">¿Quieres salir de TC Play?</h2><button id="cancel-exit">Continuar viendo</button><button id="confirm-exit">Salir</button></div></div>
+  <script src="config.js"></script><script src="core.js"></script><script src="platform.js"></script><script src="app.js"></script>
+</body>
+</html>

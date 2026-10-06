@@ -1,0 +1,17 @@
+{
+  "name": "tc-play-samsung-tv",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "start": "node scripts/serve.cjs",
+    "test": "node --test tests/*.test.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "acorn": "8.14.1",
+    "jsdom": "26.1.0"
+  }
+}
