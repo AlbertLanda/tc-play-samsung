@@ -8,7 +8,11 @@ for (const key of ['requestTimeoutMs', 'playbackTimeoutMs']) {
   if (!Number.isFinite(config[key]) || config[key] < 1000 || config[key] > 120000) throw new Error(key + ' debe estar entre 1000 y 120000.');
 }
 const dist = path.join(root, 'dist');
-fs.rmSync(dist, { recursive: true, force: true });
+// Keep the workspace directory: Windows can lock it while VS Code or a shell uses it.
+fs.mkdirSync(dist, { recursive: true });
+for (const name of fs.readdirSync(dist)) {
+  fs.rmSync(path.join(dist, name), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+}
 fs.cpSync(path.join(root, 'src'), dist, { recursive: true });
 fs.cpSync(path.join(root, 'platform'), dist, { recursive: true });
 fs.writeFileSync(path.join(dist, 'config.js'), 'window.TCPLAY_CONFIG = ' + JSON.stringify(config).replace(/</g, '\\u003c') + ';\n');
