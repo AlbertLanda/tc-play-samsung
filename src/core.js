@@ -56,7 +56,11 @@
   // One current request/player. Older replies and native callbacks cannot start playback.
   function createPlayback(api, player, config, report, timers) {
     var sequence = 0, request = null, watchdog = null, active = false;
-    timers = timers || { setTimeout: setTimeout, clearTimeout: clearTimeout };
+    // Browser timer methods must not receive the adapter object as their receiver.
+    timers = timers || {
+      setTimeout: function (fn, delay) { return setTimeout(fn, delay); },
+      clearTimeout: function (id) { clearTimeout(id); }
+    };
     function clearWatchdog() {
       if (watchdog !== null) timers.clearTimeout(watchdog);
       watchdog = null;
