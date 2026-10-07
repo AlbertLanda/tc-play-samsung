@@ -1,6 +1,107 @@
 (function (root) {
   'use strict';
   var readDiagnostics = function () { return { state: 'NONE', events: [] }; };
+  function createHtml5Player(video) {
+    var generation = 0, listeners = [], state = 'NONE', buffering = false;
+    var started = Date.now(), events = [], bufferCount = 0, bufferMs = 0, bufferSince = null;
+    var lastTime = null, progressAt = null;
+    function record(event, value) {
+      var item = { atMs: Date.now() - started, event: event };
+      if (typeof value === 'number' && isFinite(value)) item.value = value;
+      events.push(item); if (events.length > 30) events.shift();
+    }
+    function finishBuffer() {
+      if (bufferSince !== null) bufferMs += Date.now() - bufferSince;
+      bufferSince = null; buffering = false;
+    }
+    function stop() {
+      generation += 1; finishBuffer(); state = 'NONE';
+      listeners.forEach(function (entry) { video.removeEventListener(entry[0], entry[1]); });
+      listeners = [];
+      video.pause(); video.removeAttribute('src'); video.load(); video.style.display = 'none';
+      record('close');
+    }
+    document.body.appendChild(video);
+    video.controls = false; video.loop = false; video.preload = 'auto'; video.style.display = 'none';
+    readDiagnostics = function () {
+      var bounds = video.getBoundingClientRect(), ahead = 0, quality = null, support = '';
+      try {
+        for (var i = 0; i < video.buffered.length; i += 1) {
+          if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) {
+            ahead = Math.round((video.buffered.end(i) - video.currentTime) * 1000); break;
+          }
+        }
+        support = video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL');
+        if (video.getVideoPlaybackQuality) {
+          var sample = video.getVideoPlaybackQuality();
+          if (typeof sample.totalVideoFrames === 'number' && isFinite(sample.totalVideoFrames) &&
+              typeof sample.droppedVideoFrames === 'number' && isFinite(sample.droppedVideoFrames)) {
+            quality = { totalFrames: sample.totalVideoFrames, droppedFrames: sample.droppedVideoFrames };
+          }
+        }
+      } catch (ignore) {}
+      return {
+        state: state, engine: 'html5', renderer: 'html5-contain', viewport: [root.innerWidth, root.innerHeight],
+        objectRect: [bounds.left, bounds.top, bounds.width, bounds.height],
+        sourceSize: [video.videoWidth, video.videoHeight], displayMode: 'contain',
+        hlsSupport: support === 'probably' || support === 'maybe' ? support : '',
+        readyState: video.readyState, networkState: video.networkState, bufferedAheadMs: ahead,
+        frameQuality: quality, buffering: buffering, bufferingCount: bufferCount,
+        bufferingMs: bufferMs + (bufferSince === null ? 0 : Date.now() - bufferSince),
+        playbackTimeMs: Math.round(video.currentTime * 1000),
+        lastProgressAgeMs: progressAt === null ? null : Date.now() - progressAt,
+        events: events.map(function (item) {
+          var copy = { atMs: item.atMs, event: item.event };
+          if (typeof item.value === 'number') copy.value = item.value;
+          return copy;
+        })
+      };
+    };
+    return {
+      play: function (url, callbacks) {
+        stop(); started = Date.now(); events = []; bufferCount = 0; bufferMs = 0;
+        lastTime = null; progressAt = null; state = 'IDLE';
+        var ticket = generation;
+        function current() { return ticket === generation; }
+        function listen(name, callback) {
+          var handler = function () { if (current()) callback(); };
+          listeners.push([name, handler]); video.addEventListener(name, handler);
+        }
+        function fail(event) {
+          if (!current()) return;
+          state = 'ERROR'; record(event, video.error && video.error.code); callbacks.error();
+        }
+        listen('loadedmetadata', function () { record('loaded_metadata'); });
+        listen('playing', function () {
+          finishBuffer(); state = 'PLAYING'; record('playing'); callbacks.ready();
+        });
+        listen('waiting', function () {
+          if (!buffering) { bufferCount += 1; bufferSince = Date.now(); }
+          buffering = true; record('waiting'); callbacks.buffering();
+        });
+        // stalled describes resource fetching; buffered playback may still continue.
+        listen('stalled', function () { record('stalled'); });
+        listen('timeupdate', function () {
+          if (lastTime === null || video.currentTime > lastTime) progressAt = Date.now();
+          lastTime = video.currentTime;
+        });
+        listen('error', function () { fail('media_error'); });
+        listen('ended', function () { state = 'ENDED'; record('stream_complete'); callbacks.ended(); });
+        video.style.display = 'block';
+        try {
+          video.src = url; video.load(); record('open');
+          var result = video.play();
+          if (result && result.catch) result.catch(function () { fail('play_rejected'); });
+        } catch (ignore) { fail('play_failed'); }
+      },
+      stop: stop,
+      setRect: function (rect) {
+        video.style.left = rect.left + 'px'; video.style.top = rect.top + 'px';
+        video.style.width = rect.width + 'px'; video.style.height = rect.height + 'px';
+        video.width = Math.max(1, Math.round(rect.width)); video.height = Math.max(1, Math.round(rect.height));
+      }
+    };
+  }
   root.TCPlayPlatform = {
     label: 'Samsung · Tizen',
     getPlaybackDiagnostics: function () { return readDiagnostics(); },
@@ -18,6 +119,7 @@
       else root.close();
     },
     createPlayer: function (video, slot) {
+      if ((root.TCPLAY_CONFIG || {}).playerEngine === 'html5') return createHtml5Player(video);
       var av = root.webapis && root.webapis.avplay;
       var generation = 0, rectangle = [0, 0, 1920, 1080], appliedRectangle = null, object, buffering = false;
       var mode = 'PLAYER_DISPLAY_MODE_LETTER_BOX', started = Date.now(), events = [];
@@ -44,7 +146,7 @@
         if (['NONE', 'IDLE', 'READY', 'PLAYING', 'PAUSED'].indexOf(state) < 0) state = 'UNKNOWN';
         // Only explicit numeric data and internal event names: no stream URLs or raw native errors.
         return {
-          state: state, renderer: 'screen-positioned-object',
+          state: state, engine: 'avplay', renderer: 'screen-positioned-object',
           viewport: [root.innerWidth, root.innerHeight],
           objectRect: [bounds.left, bounds.top, bounds.width, bounds.height],
           displayRect: rectangle.slice(), appliedDisplayRect: appliedRectangle && appliedRectangle.slice(), displayMode: mode,

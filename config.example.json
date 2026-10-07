@@ -1,5 +1,6 @@
 {
   "apiBaseUrl": "",
+  "playerEngine": "avplay",
   "requestTimeoutMs": 15000,
   "playbackTimeoutMs": 20000
 }

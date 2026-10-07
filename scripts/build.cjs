@@ -3,6 +3,13 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const local = path.join(root, 'config.local.json');
 const config = JSON.parse(fs.readFileSync(fs.existsSync(local) ? local : path.join(root, 'config.example.json'), 'utf8'));
+const args = process.argv.slice(2);
+if (args.length) {
+  if (args.length !== 1 || !/^--player-engine=(avplay|html5)$/.test(args[0])) throw new Error('Usa --player-engine=avplay o --player-engine=html5.');
+  config.playerEngine = args[0].split('=')[1];
+}
+if (config.playerEngine === undefined) config.playerEngine = 'avplay';
+if (!['avplay', 'html5'].includes(config.playerEngine)) throw new Error('playerEngine debe ser avplay o html5.');
 if (config.apiBaseUrl && !/^https?:\/\/[^\s?#]+$/i.test(config.apiBaseUrl)) throw new Error('apiBaseUrl debe ser una URL HTTP(S) sin query ni fragmento.');
 for (const key of ['requestTimeoutMs', 'playbackTimeoutMs']) {
   if (!Number.isFinite(config[key]) || config[key] < 1000 || config[key] > 120000) throw new Error(key + ' debe estar entre 1000 y 120000.');
@@ -20,4 +27,5 @@ const html = path.join(dist, 'index.html');
 const samsung = fs.existsSync(path.join(dist, 'config.xml'));
 fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace('<!-- PLATFORM_SCRIPTS -->', samsung ? '<script src="$WEBAPIS/webapis/webapis.js"></script>' : ''));
 console.log('Aplicación ' + (samsung ? 'Samsung' : 'LG') + ' preparada en dist/.');
+console.log('Motor de reproducción: ' + config.playerEngine + '.');
 if (!config.apiBaseUrl) console.log('Configura config.local.json antes de probar el login real.');

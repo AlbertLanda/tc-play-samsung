@@ -30,9 +30,10 @@ test('build renueva archivos y paquetes antiguos sin borrar la carpeta dist abie
     return fs.rmSync(target, options);
   } };
   const source = fs.readFileSync(path.join(project, 'scripts/build.cjs'), 'utf8');
-  function build() {
+  function build(args = []) {
     vm.runInNewContext(source, {
       __dirname: path.join(root, 'scripts'), console: { log() {} },
+      process: { argv: ['node', 'build.cjs', ...args] },
       require(name) { return name === 'node:fs' ? guardedFs : require(name); }
     });
   }
@@ -46,4 +47,13 @@ test('build renueva archivos y paquetes antiguos sin borrar la carpeta dist abie
   assert.match(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /\$WEBAPIS\/webapis\/webapis\.js/);
   assert.equal(fs.readFileSync(path.join(root, 'config.local.json'), 'utf8'),
     JSON.stringify({ apiBaseUrl: 'https://api.invalid', requestTimeoutMs: 15000, playbackTimeoutMs: 20000 }));
+  const generated = () => JSON.parse(fs.readFileSync(path.join(dist, 'config.js'), 'utf8').replace(/^window.TCPLAY_CONFIG = /, '').trim().slice(0, -1));
+  assert.equal(generated().playerEngine, 'avplay');
+  build(['--player-engine=html5']);
+  assert.equal(generated().playerEngine, 'html5'); assert.equal(generated().apiBaseUrl, 'https://api.invalid');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'config.local.json'), 'utf8')).playerEngine, undefined);
+  build(); assert.equal(generated().playerEngine, 'avplay');
+  assert.throws(() => build(['--player-engine=bad']), /Usa --player-engine/);
+  fs.writeFileSync(path.join(root, 'config.local.json'), JSON.stringify({ playerEngine: 'bad' }));
+  assert.throws(() => build(), /playerEngine debe ser/);
 });

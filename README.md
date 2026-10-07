@@ -58,6 +58,16 @@ El manifiesto contiene identificadores de prueba (`TcPlayTV01.TCPlay`) y `requir
 
 ## Diagnosticar tamaño y cortes de reproducción
 
+En el emulador del usuario, AVPlay acepta un rectángulo de 771×434 y sigue recortando el video. El registro solo muestra buffering inicial; esto no demuestra que red o stream estén libres de problemas. Para comparar otro motor con la misma URL directa de Xtream, prepara una compilación explícita de prueba:
+
+```powershell
+npm run build -- --player-engine=html5
+```
+
+Vuelve a ejecutar `dist` en el emulador. Este modo usa el `<video>` de Samsung con `object-fit: contain` y dimensiones explícitas para encajar la imagen completa. No usa AVPlay, un proxy ni una conversión. La reproducción HLS mediante `<video>` depende del entorno/stream: si no lo admite, fallará y el diagnóstico mostrará el error, sin cambiar de motor automáticamente. Se puede comparar el recorte y los cortes de reproducción entre ambos motores; una mejora no prueba por sí sola la causa del fallo anterior.
+
+Para regresar a AVPlay, usa `npm run build -- --player-engine=avplay`. El parámetro solo afecta a la compilación en `dist`; no sobrescribe `config.local.json`. Sin parámetro, se utiliza `playerEngine` de ese archivo si existe, o `avplay` por defecto. Esta opción de prueba aún necesita validación en emulador y TV real.
+
 La vista previa mantiene 16:9. El objeto nativo se coloca directamente en `body`, con coordenadas de pantalla y fuera del contenedor posicionado del recuadro, siguiendo el patrón del ejemplo de Samsung. El objeto y el plano AVPlay se ajustan al interior del recuadro, excluyendo su borde. Se aplica letterbox antes y después de la preparación y al alternar pantalla completa; este cambio no vuelve a abrir el stream. Una señal 4:3 puede mostrar barras laterales. El ajuste de la superficie nativa aún requiere verificar que elimina el recorte observado en el emulador.
 
 Si un canal se congela o repite audio, deja reproducir entre 30 y 60 segundos y ejecuta en la consola del Web Inspector:
@@ -67,6 +77,8 @@ console.log(JSON.stringify(TCPlayPlatform.getPlaybackDiagnostics(), null, 2));
 ```
 
 El resultado incluye estado, viewport, rectángulo CSS real del objeto, rectángulo solicitado a AVPlay y último rectángulo aceptado, tiempo de reproducción, tiempo desde el último avance, conteo/duración de buffering y los últimos 30 eventos. Registra códigos de error conocidos; no incluye URL del stream, credenciales ni mensajes nativos completos. El diagnóstico se reinicia al elegir/reintentar un canal y no genera sondeos ni logs por cada tick. Los ticks recibidos durante buffering no lo dan por terminado.
+
+En HTML5, el diagnóstico indica `renderer: html5-contain`, dimensiones del video de origen, estado del medio, milisegundos de buffer por delante y contadores de frames totales/descartados cuando el motor los ofrece. El evento `stalled` registra demora al obtener datos y no declara buffering mientras todavía puede avanzar el video. Solo `playing` da por terminada la espera iniciada por `waiting`.
 
 Compara vista previa y pantalla completa, y prueba otro canal. Para descartar sesiones antiguas de depuración, reinicia el emulador y usa Run Project. Si continúa, compara el mismo canal en otro reproductor, deteniendo primero la reproducción en el emulador para no abrir conexiones simultáneas de la cuenta. El diagnóstico ayuda a distinguir buffering de problemas de renderizado/decodificación; el avance del reloj no prueba que audio y video estén bien. La fluidez y compatibilidad final deben comprobarse en un televisor real.
 
