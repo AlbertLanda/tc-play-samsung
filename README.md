@@ -96,6 +96,16 @@ Regresa al catálogo con `npm run build -- --player-engine=html5` y vuelve a eje
 
 Para regenerar el clip, los desarrolladores pueden ejecutar `node scripts/generate-playback-test.cjs` con FFmpeg instalado. El usuario que instala/prueba la app no necesita FFmpeg.
 
+El usuario confirmó que el clip local se reproduce fluido en su emulador, mientras los canales HLS siguen presentando cortes. Como siguiente comparación, el backend existente acepta `output: ts` en `live/stream-url`: la app puede solicitar esa salida directa sin cambiar el backend ni convertir el video.
+
+```powershell
+npm run build -- --player-engine=html5 --stream-format=ts
+```
+
+Ejecuta `dist` con **Run Project** y observa el mismo canal entre 30 y 60 segundos, en vista previa y pantalla completa. Mantén un solo reproductor conectado a la cuenta. La compilación imprime `Salida directa de Xtream: ts`. La opción solo cambia el `output` enviado al backend; conserva la URL recibida exactamente y no cambia automáticamente de formato/motor si falla. TS es un contenedor admitido por Samsung, pero eso no garantiza que este stream en vivo funcione en el motor HTML5 del emulador. Si aparece un error, registra ese resultado: no significa por sí solo que el servidor esté averiado.
+
+Para comparar de nuevo HLS, utiliza `npm run build -- --player-engine=html5 --stream-format=m3u8`. Los parámetros no escriben en `config.local.json`. Sin parámetro, `streamFormat` utiliza el valor del archivo local o `m3u8` por defecto. TS fluido frente a HLS entrecortado orientaría hacia diferencias entre ambas salidas o su reproducción; no identificaría por sí solo la causa ni garantiza inicio instantáneo.
+
 Compara vista previa y pantalla completa, y prueba otro canal. Para descartar sesiones antiguas de depuración, reinicia el emulador y usa Run Project. Si continúa, compara el mismo canal en otro reproductor, deteniendo primero la reproducción en el emulador para no abrir conexiones simultáneas de la cuenta. El diagnóstico ayuda a distinguir buffering de problemas de renderizado/decodificación; el avance del reloj no prueba que audio y video estén bien. La fluidez y compatibilidad final deben comprobarse en un televisor real.
 
 ## Compatibilidad y validación pendiente

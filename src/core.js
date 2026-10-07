@@ -85,7 +85,7 @@
       report('loading', 'Conectando con ' + channel.name + '…');
       request = api.post('live/stream-url', {
         username: credentials.username, password: credentials.password,
-        stream_id: String(channel.id), output: 'm3u8'
+        stream_id: String(channel.id), output: config.streamFormat === 'ts' ? 'ts' : 'm3u8'
       }, function (err, data) {
         if (!current()) return;
         request = null;

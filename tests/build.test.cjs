@@ -49,6 +49,11 @@ test('build renueva archivos y paquetes antiguos sin borrar la carpeta dist abie
     JSON.stringify({ apiBaseUrl: 'https://api.invalid', requestTimeoutMs: 15000, playbackTimeoutMs: 20000 }));
   const generated = () => JSON.parse(fs.readFileSync(path.join(dist, 'config.js'), 'utf8').replace(/^window.TCPLAY_CONFIG = /, '').trim().slice(0, -1));
   assert.equal(generated().playerEngine, 'avplay');
+  assert.equal(generated().streamFormat, 'm3u8');
+  build(['--player-engine=html5', '--stream-format=ts']);
+  assert.equal(generated().playerEngine, 'html5'); assert.equal(generated().streamFormat, 'ts');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'config.local.json'), 'utf8')).streamFormat, undefined);
+  build(); assert.equal(generated().streamFormat, 'm3u8');
   build(['--player-engine=html5']);
   assert.equal(generated().playerEngine, 'html5'); assert.equal(generated().apiBaseUrl, 'https://api.invalid');
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'config.local.json'), 'utf8')).playerEngine, undefined);
@@ -61,6 +66,9 @@ test('build renueva archivos y paquetes antiguos sin borrar la carpeta dist abie
   assert.match(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /id="login-screen"/);
   assert.equal(generated().playerEngine, 'html5');
   assert.throws(() => build(['--player-engine=bad']), /Usa --player-engine/);
+  assert.throws(() => build(['--stream-format=mp4']), /Usa --player-engine/);
+  fs.writeFileSync(path.join(root, 'config.local.json'), JSON.stringify({ streamFormat: 'bad' }));
+  assert.throws(() => build(), /streamFormat debe ser/);
   fs.writeFileSync(path.join(root, 'config.local.json'), JSON.stringify({ playerEngine: 'bad' }));
   assert.throws(() => build(), /playerEngine debe ser/);
 });

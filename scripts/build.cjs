@@ -8,10 +8,13 @@ let playbackTest = false;
 for (const arg of args) {
   if (arg === '--playback-test') playbackTest = true;
   else if (/^--player-engine=(avplay|html5)$/.test(arg)) config.playerEngine = arg.split('=')[1];
-  else throw new Error('Usa --player-engine=avplay, --player-engine=html5 o --playback-test.');
+  else if (/^--stream-format=(m3u8|ts)$/.test(arg)) config.streamFormat = arg.split('=')[1];
+  else throw new Error('Usa --player-engine=avplay|html5, --stream-format=m3u8|ts o --playback-test.');
 }
 if (config.playerEngine === undefined) config.playerEngine = 'avplay';
+if (config.streamFormat === undefined) config.streamFormat = 'm3u8';
 if (!['avplay', 'html5'].includes(config.playerEngine)) throw new Error('playerEngine debe ser avplay o html5.');
+if (!['m3u8', 'ts'].includes(config.streamFormat)) throw new Error('streamFormat debe ser m3u8 o ts.');
 if (config.apiBaseUrl && !/^https?:\/\/[^\s?#]+$/i.test(config.apiBaseUrl)) throw new Error('apiBaseUrl debe ser una URL HTTP(S) sin query ni fragmento.');
 for (const key of ['requestTimeoutMs', 'playbackTimeoutMs']) {
   if (!Number.isFinite(config[key]) || config[key] < 1000 || config[key] > 120000) throw new Error(key + ' debe estar entre 1000 y 120000.');
@@ -33,5 +36,6 @@ console.log('Aplicación ' + (samsung ? 'Samsung' : 'LG') + ' preparada en dist/
 if (playbackTest) console.log('Prueba local preparada: video HTML5 con MP4 incluido, sin login ni red.');
 else {
   console.log('Motor de reproducción: ' + config.playerEngine + '.');
+  console.log('Salida directa de Xtream: ' + config.streamFormat + '.');
   if (!config.apiBaseUrl) console.log('Configura config.local.json antes de probar el login real.');
 }

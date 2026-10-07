@@ -53,7 +53,7 @@ test('timeout y error de red se notifican una sola vez', () => {
   core.createApi({ apiBaseUrl: 'https://api.invalid' }, h.Xhr).post('login', {}, e => errors.push(e.code));
   h.sent[0].ontimeout(); h.sent[0].onerror(); assert.deepEqual(errors, ['timeout']);
 });
-function playbackHarness() {
+function playbackHarness(config = {}) {
   const pending = [], plays = [], reports = [], timers = new Map(); let timerId = 0, stops = 0;
   const api = { post(path, body, callback) {
     const request = { path, body, callback, aborted: false, abort() { this.aborted = true; } };
@@ -61,7 +61,7 @@ function playbackHarness() {
   } };
   const player = { stop() { stops++; }, play(url, callbacks) { plays.push({ url, callbacks }); } };
   const clock = { setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout(id) { timers.delete(id); } };
-  const controller = core.createPlayback(api, player, {}, (...report) => reports.push(report), clock);
+  const controller = core.createPlayback(api, player, config, (...report) => reports.push(report), clock);
   return { controller, pending, plays, reports, timers, stops: () => stops };
 }
 const credentials = { username: 'test', password: 'secret' };
@@ -73,6 +73,18 @@ test('reproducción pide únicamente URL directa HLS, sin proxy', () => {
   h.pending[0].callback(null, { stream_url: 'https://xtream.invalid/live/test/secret/1.m3u8' });
   assert.equal(h.plays.length, 1); h.plays[0].callbacks.ready();
   assert.equal(h.controller.isActive(), true); assert.equal(h.timers.size, 0);
+});
+test('comparación TS pide el formato al backend y reproduce su URL exacta sin fallback', () => {
+  const h = playbackHarness({ streamFormat: 'ts' }); h.controller.play(credentials, a);
+  assert.equal(h.pending[0].path, 'live/stream-url');
+  assert.deepEqual(h.pending[0].body, { ...credentials, stream_id: '1', output: 'ts' });
+  const url = 'https://xtream.invalid/live/test/secret/1.ts?token=opaque';
+  h.pending[0].callback(null, { stream_url: url });
+  assert.equal(h.plays[0].url, url);
+  h.plays[0].callbacks.error();
+  assert.equal(h.pending.length, 1); assert.equal(h.plays.length, 1);
+  assert.equal(h.controller.isActive(), false); assert.equal(h.timers.size, 0);
+  assert.equal(h.reports.at(-1)[0], 'error');
 });
 test('zapping descarta URL del canal anterior aunque llegue tarde', () => {
   const h = playbackHarness(); h.controller.play(credentials, a); h.controller.play(credentials, b);
