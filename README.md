@@ -56,6 +56,20 @@ Sustituye `TU_PERFIL_DE_CERTIFICADO` por el perfil creado en Certificate Manager
 
 El manifiesto contiene identificadores de prueba (`TcPlayTV01.TCPlay`) y `required_version=2.3`, como punto de partida de desarrollo; **no demuestra funcionamiento en todas las versiones desde 2.3**. Revisar los identificadores al registrar la app. La política de red permite los hosts de origen variables de Xtream para la prueba; antes de distribución debe ajustarse a los dominios reales y revisarse CSP y demás requisitos de tienda.
 
+## Diagnosticar tamaño y cortes de reproducción
+
+La vista previa mantiene 16:9. El objeto nativo y el plano AVPlay se ajustan al interior del recuadro, excluyendo su borde. Se aplica letterbox antes y después de la preparación y al alternar pantalla completa; este cambio no vuelve a abrir el stream. Una señal 4:3 puede mostrar barras laterales.
+
+Si un canal se congela o repite audio, deja reproducir entre 30 y 60 segundos y ejecuta en la consola del Web Inspector:
+
+```js
+console.log(JSON.stringify(TCPlayPlatform.getPlaybackDiagnostics(), null, 2));
+```
+
+El resultado incluye estado, rectángulo, tiempo de reproducción, tiempo desde el último avance, conteo/duración de buffering y los últimos 30 eventos. Registra códigos de error conocidos; no incluye URL del stream, credenciales ni mensajes nativos completos. El diagnóstico se reinicia al elegir/reintentar un canal y no genera sondeos ni logs por cada tick. Los ticks recibidos durante buffering no lo dan por terminado.
+
+Compara vista previa y pantalla completa, y prueba otro canal. Para descartar sesiones antiguas de depuración, reinicia el emulador y usa Run Project. Si continúa, compara el mismo canal en otro reproductor, deteniendo primero la reproducción en el emulador para no abrir conexiones simultáneas de la cuenta. El diagnóstico ayuda a distinguir buffering de problemas de renderizado/decodificación; el avance del reloj no prueba que audio y video estén bien. La fluidez y compatibilidad final deben comprobarse en un televisor real.
+
 ## Compatibilidad y validación pendiente
 
 El código que corre en TV tiene sintaxis ES5 y no requiere React, módulos ES, fetch, Promise ni Media Source Extensions. La familia objetivo es Samsung Tizen; no incluye televisores anteriores con plataforma Orsay.

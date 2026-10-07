@@ -7,7 +7,7 @@ const source = name => fs.readFileSync(path.join(__dirname, '../src', name), 'ut
 function mount(t) {
   const dom = new JSDOM(source('index.html'), { runScripts: 'outside-only', url: 'https://tv.invalid', pretendToBeVisual: true });
   t.after(() => dom.window.close());
-  const w = dom.window, requests = [], plays = []; let stops = 0;
+  const w = dom.window, requests = [], plays = [], rectangles = []; let stops = 0;
   w.TCPLAY_CONFIG = { apiBaseUrl: 'https://api.invalid' };
   w.XMLHttpRequest = class {
     open(method, url) { this.url = url; }
@@ -17,7 +17,7 @@ function mount(t) {
     reply(data) { this.status = 200; this.responseText = JSON.stringify(data); this.onload(); }
   };
   w.TCPlayPlatform = { label: 'Test TV', init() {}, exit() {}, keyAction: code => ({ 461: 'back', 10009: 'back', 427: 'next', 428: 'previous' }[code]), createPlayer: () => ({
-    play(url, callbacks) { plays.push({ url, callbacks }); }, stop() { stops++; }, setRect() {}
+    play(url, callbacks) { plays.push({ url, callbacks }); }, stop() { stops++; }, setRect(rect, width, height) { rectangles.push({ rect, width, height }); }
   }) };
   w.eval(source('core.js')); w.eval(source('app.js'));
   const el = id => w.document.getElementById(id);
@@ -29,8 +29,25 @@ function mount(t) {
     requests[1].reply({ success: true, categories: [{ id: 1, name: 'Noticias' }, { id: 2, name: 'Deportes' }] });
     requests[2].reply({ success: true, channels: [{ id: 10, name: 'Canal 10' }, { id: 11, name: 'Canal 11' }] });
   }
-  return { w, el, key, requests, plays, login, stops: () => stops };
+  return { w, el, key, requests, plays, rectangles, login, stops: () => stops };
 }
+test('preview excluye borde; fullscreen y Return cambian rectángulo sin reiniciar stream', t => {
+  const h = mount(t), anchor = h.el('preview-anchor');
+  anchor.getBoundingClientRect = () => ({ left: 700, top: 160, width: 644, height: 364 });
+  for (const [name, value] of Object.entries({ clientLeft: 2, clientTop: 2, clientWidth: 640, clientHeight: 360 })) {
+    Object.defineProperty(anchor, name, { value });
+  }
+  h.login(); h.el('channels').firstChild.click();
+  h.requests[3].reply({ success: true, stream_url: 'https://xtream.invalid/test.m3u8' });
+  const preview = { left: 702, top: 162, width: 640, height: 360 };
+  assert.deepEqual(JSON.parse(JSON.stringify(h.rectangles.at(-1).rect)), preview);
+  assert.equal(h.el('media-slot').style.width, '640px');
+  h.el('fullscreen').click();
+  assert.deepEqual(JSON.parse(JSON.stringify(h.rectangles.at(-1).rect)), { left: 0, top: 0, width: h.w.innerWidth, height: h.w.innerHeight });
+  h.key(10009);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.rectangles.at(-1).rect)), preview);
+  assert.equal(h.plays.length, 1);
+});
 test('login carga catálogo sin iniciar video y borra contraseña del formulario', t => {
   const h = mount(t); h.login();
   assert.equal(h.el('home-screen').classList.contains('hidden'), false);

@@ -82,8 +82,11 @@
   function positionPlayer() {
     if (!credentials) return;
     hide('media-slot', false);
-    var rect = fullscreen ? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } :
-      el('preview-anchor').getBoundingClientRect();
+    var anchor = el('preview-anchor'), bounds = anchor.getBoundingClientRect();
+    var rect = fullscreen ? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } : {
+      left: bounds.left + anchor.clientLeft, top: bounds.top + anchor.clientTop,
+      width: anchor.clientWidth, height: anchor.clientHeight
+    };
     var slot = el('media-slot');
     slot.style.left = rect.left + 'px'; slot.style.top = rect.top + 'px';
     slot.style.width = rect.width + 'px'; slot.style.height = rect.height + 'px';
