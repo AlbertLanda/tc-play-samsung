@@ -78,7 +78,23 @@ console.log(JSON.stringify(TCPlayPlatform.getPlaybackDiagnostics(), null, 2));
 
 El resultado incluye estado, viewport, rectángulo CSS real del objeto, rectángulo solicitado a AVPlay y último rectángulo aceptado, tiempo de reproducción, tiempo desde el último avance, conteo/duración de buffering y los últimos 30 eventos. Registra códigos de error conocidos; no incluye URL del stream, credenciales ni mensajes nativos completos. El diagnóstico se reinicia al elegir/reintentar un canal y no genera sondeos ni logs por cada tick. Los ticks recibidos durante buffering no lo dan por terminado.
 
-En HTML5, el diagnóstico indica `renderer: html5-contain`, dimensiones del video de origen, estado del medio, milisegundos de buffer por delante y contadores de frames totales/descartados cuando el motor los ofrece. El evento `stalled` registra demora al obtener datos y no declara buffering mientras todavía puede avanzar el video. Solo `playing` da por terminada la espera iniciada por `waiting`.
+En HTML5, el diagnóstico indica `renderer: html5-contain`, dimensiones del video de origen, estado del medio, milisegundos de buffer por delante y contadores de frames totales/descartados cuando el motor los ofrece. Si no hay rangos de buffer expuestos, `bufferedAheadMs` es `null`; si los frames totales permanecen en cero, `frameQuality` es `null`. Esas métricas ausentes no prueban falta de datos ni ausencia de cortes. El evento `stalled` registra demora al obtener datos y no declara buffering mientras todavía puede avanzar el video. Solo `playing` da por terminada la espera iniciada por `waiting`.
+
+### Prueba local sin Xtream ni conexión
+
+Si los dos motores presentan cortes, compara con el clip sintético incluido (20 s, H.264 Baseline 720×480 a 30 fps, AAC mono 48 kHz, cuadro en movimiento, contador de frames y tono continuo). No contiene contenido de canales ni credenciales.
+
+```powershell
+npm run build -- --playback-test
+```
+
+Ejecuta `dist` con **Run Project**, sin Inspector, y presiona **Iniciar / repetir**. Esta compilación abre una página aislada: no carga la app, el login, los adaptadores AVPlay/HTML5 del catálogo ni las API. Observa el movimiento y escucha el tono; los contadores del navegador no bastan para afirmar que es fluido. Al terminar, **Mostrar diagnóstico** incluye el tiempo de inicio y eventos. En Debug Project también puedes ejecutar `getLocalPlaybackTestDiagnostics()`.
+
+Si el clip local también se corta, revisa emulador/host/decodificación: el contenido de Xtream y la red quedan fuera de esa prueba. Si el clip es fluido, todavía hay que comprobar el HLS real, su codificación y la conexión. El clip simple no certifica todos los codecs ni la reproducción en TV física. Puedes abrir `dist/playback-test.html` en el navegador del PC para comparar el mismo archivo fuera del emulador.
+
+Regresa al catálogo con `npm run build -- --player-engine=html5` y vuelve a ejecutar `dist`. El modo de prueba solo reemplaza el punto de entrada en la compilación, sin modificar el proyecto original ni la configuración local.
+
+Para regenerar el clip, los desarrolladores pueden ejecutar `node scripts/generate-playback-test.cjs` con FFmpeg instalado. El usuario que instala/prueba la app no necesita FFmpeg.
 
 Compara vista previa y pantalla completa, y prueba otro canal. Para descartar sesiones antiguas de depuración, reinicia el emulador y usa Run Project. Si continúa, compara el mismo canal en otro reproductor, deteniendo primero la reproducción en el emulador para no abrir conexiones simultáneas de la cuenta. El diagnóstico ayuda a distinguir buffering de problemas de renderizado/decodificación; el avance del reloj no prueba que audio y video estén bien. La fluidez y compatibilidad final deben comprobarse en un televisor real.
 

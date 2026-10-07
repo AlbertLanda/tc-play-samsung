@@ -24,8 +24,10 @@
     document.body.appendChild(video);
     video.controls = false; video.loop = false; video.preload = 'auto'; video.style.display = 'none';
     readDiagnostics = function () {
-      var bounds = video.getBoundingClientRect(), ahead = 0, quality = null, support = '';
+      var bounds = video.getBoundingClientRect(), ahead = null, ranges = 0, quality = null, support = '';
       try {
+        ranges = video.buffered.length;
+        if (ranges) ahead = 0;
         for (var i = 0; i < video.buffered.length; i += 1) {
           if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) {
             ahead = Math.round((video.buffered.end(i) - video.currentTime) * 1000); break;
@@ -34,7 +36,7 @@
         support = video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL');
         if (video.getVideoPlaybackQuality) {
           var sample = video.getVideoPlaybackQuality();
-          if (typeof sample.totalVideoFrames === 'number' && isFinite(sample.totalVideoFrames) &&
+          if (typeof sample.totalVideoFrames === 'number' && sample.totalVideoFrames > 0 && isFinite(sample.totalVideoFrames) &&
               typeof sample.droppedVideoFrames === 'number' && isFinite(sample.droppedVideoFrames)) {
             quality = { totalFrames: sample.totalVideoFrames, droppedFrames: sample.droppedVideoFrames };
           }
@@ -45,7 +47,7 @@
         objectRect: [bounds.left, bounds.top, bounds.width, bounds.height],
         sourceSize: [video.videoWidth, video.videoHeight], displayMode: 'contain',
         hlsSupport: support === 'probably' || support === 'maybe' ? support : '',
-        readyState: video.readyState, networkState: video.networkState, bufferedAheadMs: ahead,
+        readyState: video.readyState, networkState: video.networkState, bufferedRangeCount: ranges, bufferedAheadMs: ahead,
         frameQuality: quality, buffering: buffering, bufferingCount: bufferCount,
         bufferingMs: bufferMs + (bufferSince === null ? 0 : Date.now() - bufferSince),
         playbackTimeMs: Math.round(video.currentTime * 1000),

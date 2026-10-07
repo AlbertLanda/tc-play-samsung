@@ -83,3 +83,10 @@ test('HTML5 informa buffer disponible y frames descartados sin exponer URL ni er
   d = h.diagnostics(); assert.equal(d.events.length, 30);
   d.events[0].event = 'changed'; assert.notEqual(h.diagnostics().events[0].event, 'changed');
 });
+
+test('HTML5 no interpreta rangos vacíos y contadores cero como métricas de fluidez disponibles', t => {
+  const h = mount(t); h.player.play('https://xtream.invalid/live.m3u8', h.callbacks);
+  h.video.getVideoPlaybackQuality = () => ({ totalVideoFrames: 0, droppedVideoFrames: 0 });
+  const d = h.diagnostics();
+  assert.equal(d.frameQuality, null); assert.equal(d.bufferedRangeCount, 0); assert.equal(d.bufferedAheadMs, null);
+});

@@ -53,6 +53,13 @@ test('build renueva archivos y paquetes antiguos sin borrar la carpeta dist abie
   assert.equal(generated().playerEngine, 'html5'); assert.equal(generated().apiBaseUrl, 'https://api.invalid');
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'config.local.json'), 'utf8')).playerEngine, undefined);
   build(); assert.equal(generated().playerEngine, 'avplay');
+  build(['--playback-test']);
+  assert.equal(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), fs.readFileSync(path.join(root, 'src/playback-test.html'), 'utf8'));
+  assert.ok(fs.statSync(path.join(dist, 'assets/playback-test.mp4')).size > 0);
+  assert.doesNotMatch(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /src="(?:config|core|app|platform)\.js"/);
+  build(['--player-engine=html5']);
+  assert.match(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /id="login-screen"/);
+  assert.equal(generated().playerEngine, 'html5');
   assert.throws(() => build(['--player-engine=bad']), /Usa --player-engine/);
   fs.writeFileSync(path.join(root, 'config.local.json'), JSON.stringify({ playerEngine: 'bad' }));
   assert.throws(() => build(), /playerEngine debe ser/);
