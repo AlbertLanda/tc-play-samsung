@@ -19,7 +19,7 @@
     },
     createPlayer: function (video, slot) {
       var av = root.webapis && root.webapis.avplay;
-      var generation = 0, rectangle = [0, 0, 1920, 1080], object, buffering = false;
+      var generation = 0, rectangle = [0, 0, 1920, 1080], appliedRectangle = null, object, buffering = false;
       var mode = 'PLAYER_DISPLAY_MODE_LETTER_BOX', started = Date.now(), events = [];
       var bufferCount = 0, bufferSince = null, bufferMs = 0, playTime = null, progressAt = null;
       function record(event, value) {
@@ -39,12 +39,15 @@
         if (known.indexOf(code) >= 0) events[events.length - 1].code = code;
       }
       readDiagnostics = function () {
-        var state = 'NONE';
+        var state = 'NONE', bounds = object.getBoundingClientRect();
         try { if (av) state = av.getState(); } catch (ignore) {}
         if (['NONE', 'IDLE', 'READY', 'PLAYING', 'PAUSED'].indexOf(state) < 0) state = 'UNKNOWN';
         // Only explicit numeric data and internal event names: no stream URLs or raw native errors.
         return {
-          state: state, displayRect: rectangle.slice(), displayMode: mode,
+          state: state, renderer: 'screen-positioned-object',
+          viewport: [root.innerWidth, root.innerHeight],
+          objectRect: [bounds.left, bounds.top, bounds.width, bounds.height],
+          displayRect: rectangle.slice(), appliedDisplayRect: appliedRectangle && appliedRectangle.slice(), displayMode: mode,
           buffering: buffering, bufferingCount: bufferCount,
           bufferingMs: bufferMs + (bufferSince === null ? 0 : Date.now() - bufferSince),
           playbackTimeMs: playTime, lastProgressAgeMs: progressAt === null ? null : Date.now() - progressAt,
@@ -58,27 +61,31 @@
       };
       video.style.display = 'none';
       object = document.createElement('object');
-      object.id = 'native-player'; object.type = 'application/avplayer'; slot.appendChild(object);
+      object.id = 'native-player'; object.type = 'application/avplayer';
+      // Match Samsung's screen-positioned object, outside the positioned preview parent.
+      object.style.display = 'none'; document.body.appendChild(object);
       function stop() {
         generation += 1;
         if (bufferSince !== null) bufferMs += Date.now() - bufferSince;
         bufferSince = null; buffering = false;
         record('close');
-        if (!av) return;
-        try { av.close(); } catch (ignore) {}
+        if (av) { try { av.close(); } catch (ignore) {} }
+        object.style.display = 'none';
       }
       function display() {
         av.setDisplayRect.apply(av, rectangle);
+        appliedRectangle = rectangle.slice();
         av.setDisplayMethod(mode);
       }
       return {
         play: function (url, callbacks) {
           stop();
           started = Date.now(); events = []; bufferCount = 0; bufferMs = 0;
-          playTime = null; progressAt = null;
+          playTime = null; progressAt = null; appliedRectangle = null;
           var ticket = generation;
           function current() { return ticket === generation; }
           if (!av) { failure('avplay_unavailable'); callbacks.error(); return; }
+          object.style.display = 'block';
           try {
             av.open(url);
             record('open');
@@ -120,7 +127,8 @@
         },
         stop: stop,
         setRect: function (rect, width, height) {
-          // Keep the native object and AVPlay plane at the same computed size.
+          // CSS coordinates are relative to the screen; AVPlay uses its 1920x1080 plane.
+          object.style.left = rect.left + 'px'; object.style.top = rect.top + 'px';
           object.style.width = rect.width + 'px'; object.style.height = rect.height + 'px';
           rectangle = [Math.round(rect.left * 1920 / width), Math.round(rect.top * 1080 / height),
             Math.max(1, Math.round(rect.width * 1920 / width)), Math.max(1, Math.round(rect.height * 1080 / height))];

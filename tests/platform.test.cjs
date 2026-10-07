@@ -46,6 +46,8 @@ test('Samsung convierte coordenadas al plano AVPlay de 1920x1080; LG usa video',
     assert.deepEqual(rectangle, [150, 75, 900, 450]);
     assert.equal(w.document.getElementById('native-player').style.width, '600px');
     assert.equal(w.document.getElementById('native-player').style.height, '300px');
+    assert.equal(w.document.getElementById('native-player').style.left, '100px');
+    assert.equal(w.document.getElementById('native-player').style.top, '50px');
   }
   else assert.equal(w.document.querySelectorAll('video').length, 1);
 });
@@ -71,6 +73,13 @@ test('AVPlay configura letterbox antes de preparar y conserva fullscreen al term
   player.setRect({ left: 100, top: 50, width: 640, height: 360 }, 1280, 720);
   assert.deepEqual(rectangle, [150, 75, 960, 540]);
   assert.equal(calls.filter(c => c === 'play').length, 1);
+  const native = w.document.getElementById('native-player');
+  assert.equal(native.parentNode, w.document.body);
+  assert.equal(native.style.left, '100px'); assert.equal(native.style.top, '50px');
+  assert.equal(native.style.display, 'block');
+  player.stop(); assert.equal(native.style.display, 'none');
+  player.setRect({ left: 0, top: 0, width: 1280, height: 720 }, 1280, 720);
+  assert.equal(native.style.display, 'none');
 });
 
 test('ticks durante buffering no declaran ready; diagnóstico acotado no expone URL ni mensajes nativos', t => {
@@ -101,7 +110,32 @@ test('ticks durante buffering no declaran ready; diagnóstico acotado no expone 
   diagnostic.events[0].event = 'changed'; diagnostic.displayRect[0] = 999;
   assert.notEqual(w.TCPlayPlatform.getPlaybackDiagnostics().events[0].event, 'changed');
   assert.notEqual(w.TCPlayPlatform.getPlaybackDiagnostics().displayRect[0], 999);
+  diagnostic.appliedDisplayRect[0] = 999;
+  assert.notEqual(w.TCPlayPlatform.getPlaybackDiagnostics().appliedDisplayRect[0], 999);
   player.play(secret, callbacks); listeners[0].onbufferingstart();
   assert.equal(w.TCPlayPlatform.getPlaybackDiagnostics().bufferingCount, 0);
   assert.equal(w.TCPlayPlatform.getPlaybackDiagnostics().bufferingMs, 0);
+});
+
+test('diagnóstico distingue rectángulo solicitado y aplicado cuando AVPlay rechaza redimensionar', t => {
+  const w = mount(t); let reject = false;
+  w.webapis = { avplay: {
+    getState: () => 'PLAYING',
+    setDisplayRect() { if (reject) throw { name: 'InvalidStateError', message: 'private stream URL' }; },
+    setDisplayMethod() {}
+  } };
+  w.eval(fs.readFileSync(path.join(__dirname, '../src/platform.js'), 'utf8'));
+  const player = w.TCPlayPlatform.createPlayer(w.document.getElementById('video'), w.document.getElementById('slot'));
+  const native = w.document.getElementById('native-player');
+  native.getBoundingClientRect = () => ({ left: 100, top: 50, width: 640, height: 360 });
+  player.setRect({ left: 100, top: 50, width: 640, height: 360 }, 1280, 720);
+  reject = true;
+  player.setRect({ left: 0, top: 0, width: 1280, height: 720 }, 1280, 720);
+  const d = JSON.parse(JSON.stringify(w.TCPlayPlatform.getPlaybackDiagnostics()));
+  assert.deepEqual(d.displayRect, [0, 0, 1920, 1080]);
+  assert.deepEqual(d.appliedDisplayRect, [150, 75, 960, 540]);
+  assert.deepEqual(d.objectRect, [100, 50, 640, 360]);
+  assert.equal(d.renderer, 'screen-positioned-object');
+  assert.equal(d.events.at(-1).code, 'InvalidStateError');
+  assert.equal(JSON.stringify(d).includes('private stream URL'), false);
 });
