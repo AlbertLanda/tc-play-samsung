@@ -13,7 +13,7 @@
       record(name);
       if (name === 'playing') {
         if (started !== null && firstPlaying === null) firstPlaying = Date.now() - started;
-        status.textContent = 'Reproduciendo archivo local. Observa el movimiento y escucha el tono.';
+        status.textContent = 'Reproduciendo archivo local. Observa el video y escucha el audio.';
       } else if (name === 'ended') status.textContent = 'Prueba terminada. Puedes repetirla o mostrar el diagnóstico.';
       else if (name === 'error') status.textContent = 'No se pudo reproducir el archivo local. Muestra el diagnóstico.';
     });
@@ -26,7 +26,7 @@
         if (q.totalVideoFrames > 0) quality = { totalFrames: q.totalVideoFrames, droppedFrames: q.droppedVideoFrames };
       }
     } catch (ignore) {}
-    return { source: 'bundled-mp4', startupMs: firstPlaying, playbackTimeMs: Math.round(video.currentTime * 1000),
+    return { source: video.getAttribute('data-test-source') === 'captured-ts' ? 'captured-ts' : 'bundled-mp4', startupMs: firstPlaying, playbackTimeMs: Math.round(video.currentTime * 1000),
       sourceSize: [video.videoWidth, video.videoHeight], readyState: video.readyState,
       frameQuality: quality, events: events.map(function (event) {
         var copy = { event: event.event, atMs: event.atMs };

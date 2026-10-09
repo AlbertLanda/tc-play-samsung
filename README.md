@@ -106,6 +106,31 @@ Ejecuta `dist` con **Run Project** y observa el mismo canal entre 30 y 60 segund
 
 Para comparar de nuevo HLS, utiliza `npm run build -- --player-engine=html5 --stream-format=m3u8`. Los parámetros no escriben en `config.local.json`. Sin parámetro, `streamFormat` utiliza el valor del archivo local o `m3u8` por defecto. TS fluido frente a HLS entrecortado orientaría hacia diferencias entre ambas salidas o su reproducción; no identificaría por sí solo la causa ni garantiza inicio instantáneo.
 
+### Comparar el canal real sin red
+
+El usuario confirmó que HTML5/TS también presenta cortes en el emulador. Android volvió a reproducir al liberar la conexión simultánea y no presenta esos hipos. Esto orienta la investigación hacia el entorno Samsung/emulador y su recepción del directo, sin identificar todavía la causa.
+
+Para conservar la codificación real del canal y separar recepción en vivo de reproducción local, cierra TC Play en Android y apaga el emulador. Si acabas de cerrar un directo, espera a que el proveedor libere la sesión. Desde la raíz del proyecto:
+
+```powershell
+git pull --ff-only
+npm run capture-test
+```
+
+Introduce usuario y contraseña únicamente en tu terminal. La contraseña no se muestra; se mantienen en memoria para consultar el catálogo y pedir la URL TS al endpoint existente. Pulsa Enter para buscar WILLAX o escribe otro nombre, y selecciona el número si aparecen varias coincidencias. No pongas credenciales ni URLs privadas en comandos, capturas o mensajes.
+
+El comando abre una sola conexión directa a Xtream, copia hasta 30 segundos o 50 MB de bytes TS sin convertir video/audio y cierra la conexión al terminar. No requiere FFmpeg. Guarda solo el fragmento en `.diagnostics/channel.ts`, carpeta excluida de Git. La duración del contenido puede diferir de 30 segundos por la entrega del servidor; la captura no incluye una prueba de codecs/continuidad. Un error de captura no elimina una captura anterior. Ctrl+C cancela la descarga y descarta el parcial.
+
+```powershell
+npm run build -- --playback-test=channel
+```
+
+Enciende el emulador y ejecuta `dist` con **Run Project**, sin Inspector. Pulsa **Iniciar / repetir**, compara tamaño pequeño/grande y observa si reaparece el hipo. Esta página reproduce el archivo incluido: no usa API, login ni red. **Mostrar diagnóstico** identifica `source: captured-ts`. Si el TS local no abre, registra el error: no prueba por sí solo que la señal esté dañada.
+
+Compara también el mismo `.diagnostics/channel.ts` en un reproductor de PC que admita TS, si ya dispones de uno. Si el mismo archivo se corta solo en el emulador, eso orienta hacia su motor/host/compatibilidad. Si el archivo va fluido allí y el directo se corta, orienta hacia diferencias del flujo en vivo, su recepción o temporización. Si el archivo se corta también en PC, aún hay que distinguir problemas de la señal de los introducidos durante la captura. Ignora un posible corte al final del fragmento: la descarga se detiene sin esperar el final natural del canal.
+
+Regresa al catálogo con `npm run build -- --player-engine=html5 --stream-format=ts`. Una compilación normal no incluye el fragmento capturado. La validación en una TV Samsung física continúa pendiente antes de distribuir.
+
 Compara vista previa y pantalla completa, y prueba otro canal. Para descartar sesiones antiguas de depuración, reinicia el emulador y usa Run Project. Si continúa, compara el mismo canal en otro reproductor, deteniendo primero la reproducción en el emulador para no abrir conexiones simultáneas de la cuenta. El diagnóstico ayuda a distinguir buffering de problemas de renderizado/decodificación; el avance del reloj no prueba que audio y video estén bien. La fluidez y compatibilidad final deben comprobarse en un televisor real.
 
 ## Compatibilidad y validación pendiente

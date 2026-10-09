@@ -65,6 +65,18 @@ test('build renueva archivos y paquetes antiguos sin borrar la carpeta dist abie
   build(['--player-engine=html5']);
   assert.match(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /id="login-screen"/);
   assert.equal(generated().playerEngine, 'html5');
+  const before = fs.readFileSync(path.join(dist, 'index.html'), 'utf8');
+  assert.throws(() => build(['--playback-test=channel']), /capture-test/);
+  assert.equal(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), before);
+  fs.mkdirSync(path.join(root, '.diagnostics'));
+  const captured = Buffer.from('fixture-only-ts');
+  fs.writeFileSync(path.join(root, '.diagnostics/channel.ts'), captured);
+  build(['--playback-test=channel']);
+  assert.deepEqual(fs.readFileSync(path.join(dist, 'assets/channel-test.ts')), captured);
+  assert.match(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /data-test-source="captured-ts" src="assets\/channel-test.ts"/);
+  assert.doesNotMatch(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /src="(?:config|core|app|platform)\.js"/);
+  build(['--player-engine=html5']);
+  assert.equal(fs.existsSync(path.join(dist, 'assets/channel-test.ts')), false);
   assert.throws(() => build(['--player-engine=bad']), /Usa --player-engine/);
   assert.throws(() => build(['--stream-format=mp4']), /Usa --player-engine/);
   fs.writeFileSync(path.join(root, 'config.local.json'), JSON.stringify({ streamFormat: 'bad' }));

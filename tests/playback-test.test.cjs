@@ -47,3 +47,11 @@ test('prueba local registra espera/error sin exponer mensajes y libera video al 
   d.events[0].event = 'changed'; assert.notEqual(h.w.getLocalPlaybackTestDiagnostics().events[0].event, 'changed');
   h.w.dispatchEvent(new h.w.Event('pagehide')); assert.equal(h.video.hasAttribute('src'), false);
 });
+test('captura TS se identifica sin exponer nombre, URL ni cuenta', t => {
+  const h = mount(t);
+  h.video.setAttribute('data-test-source', 'captured-ts');
+  h.video.setAttribute('src', 'assets/channel-test.ts');
+  h.click('start-test'); h.event('playing');
+  assert.equal(h.w.getLocalPlaybackTestDiagnostics().source, 'captured-ts');
+  h.click('size-test'); assert.equal(h.counts().plays, 1);
+});

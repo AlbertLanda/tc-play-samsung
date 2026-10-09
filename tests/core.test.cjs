@@ -6,7 +6,7 @@ const acorn = require('acorn');
 const core = require('../src/core.js');
 
 test('todo el código que corre en TV mantiene sintaxis ES5', () => {
-  for (const name of ['core.js', 'app.js', 'platform.js']) {
+  for (const name of ['core.js', 'app.js', 'platform.js', 'playback-test.js']) {
     acorn.parse(fs.readFileSync(path.join(__dirname, '../src', name), 'utf8'), { ecmaVersion: 5 });
   }
 });
