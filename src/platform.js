@@ -106,7 +106,11 @@
   }
   root.TCPlayPlatform = {
     label: 'Samsung · Tizen',
-    getPlaybackDiagnostics: function () { return readDiagnostics(); },
+    getPlaybackDiagnostics: function () {
+      var result = readDiagnostics();
+      if (root.TCPlayApp) result.channelSwitch = root.TCPlayApp.getChannelSwitchDiagnostics();
+      return result;
+    },
     init: function () {
       if (!root.tizen || !root.tizen.tvinputdevice) return;
       ['ChannelUp', 'ChannelDown'].forEach(function (key) {

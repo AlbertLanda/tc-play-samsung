@@ -5,6 +5,10 @@ Proyecto independiente en `AlbertLanda/tc-play-samsung`. El código de la app es
 ## Funciones incluidas
 
 - Login con la API existente, categorías y canales.
+- Al iniciar sesión, reproduce Willax automáticamente y abre su categoría/página. Prioriza el nombre exacto WILLAX, luego variantes como WILLAX HD; si no existe, usa el primer canal disponible. Un catálogo vacío no intenta abrir video.
+- Consulta categorías y catálogo global en paralelo y conserva los listados en memoria durante la sesión. **Volver a cargar** renueva la categoría desde la API. Si falla el catálogo global o faltan IDs de categoría, mantiene la consulta por categoría.
+- Una vez reproduciendo, prepara las URLs de hasta 12 canales visibles, con dos consultas simultáneas como máximo. No descarga sus videos ni abre conexiones de reproducción adicionales. Conserva hasta 24 URLs durante 60 segundos en memoria; caducan, se eliminan al cerrar sesión/ocultar/salir y **Reintentar canal** pide una URL nueva.
+- Pulsar OK sobre el canal que ya está conectando/reproduciendo no reinicia el video. CH+/CH− mantiene visible la página del canal seleccionado.
 - Navegación con flechas, OK, Return (10009), CH+ y CH−.
 - Catálogo paginado de 12 canales para reducir nodos en televisores con pocos recursos.
 - Reproducción HLS (`m3u8`) con Samsung AVPlay: preparación asíncrona, miniatura y pantalla completa; coordenadas convertidas al plano de 1920×1080.
@@ -78,6 +82,22 @@ console.log(JSON.stringify(TCPlayPlatform.getPlaybackDiagnostics(), null, 2));
 
 El resultado incluye estado, viewport, rectángulo CSS real del objeto, rectángulo solicitado a AVPlay y último rectángulo aceptado, tiempo de reproducción, tiempo desde el último avance, conteo/duración de buffering y los últimos 30 eventos. Registra códigos de error conocidos; no incluye URL del stream, credenciales ni mensajes nativos completos. El diagnóstico se reinicia al elegir/reintentar un canal y no genera sondeos ni logs por cada tick. Los ticks recibidos durante buffering no lo dan por terminado.
 
+`channelSwitch` separa `urlResolutionMs` (obtener/reutilizar la URL) de `playerStartupMs` (desde abrirla hasta el primer estado de reproducción) y `totalStartupMs`. `urlSource: prepared` indica una URL ya disponible en memoria; `request` indica consulta al backend. Estos tiempos no prueban que el primer frame/audio haya sido presentado. Preparar URLs reduce consultas al cambiar de canal, pero no garantiza inicio instantáneo ni acorta necesariamente la carga del stream en la TV.
+
+### Resultado en TV física y actualización
+
+El 10 de octubre de 2026 el usuario instaló esta app en una Samsung QN65LS03AAGXPE con Tizen 6.0. Reportó audio/video fluidos sin los hipos del emulador con **HTML5 + TS**, tanto para una fuente 720×480 como para una 1920×1080. Las muestras registraron arranques de aproximadamente 4,1 y 5,6 segundos. Esto orienta hacia diferencias del emulador, pero no certifica todos los canales/modelos ni identifica por sí solo la causa.
+
+Para instalar la mejora de inicio automático/cambio de canal, cierra TC Play en la TV y conserva la misma configuración que funcionó:
+
+```powershell
+Set-Location C:\Users\aalrp\Proyectos\tc-play-samsung-app
+git pull --ff-only
+npm run build -- --player-engine=html5 --stream-format=ts
+```
+
+En VS Code abre `dist`, selecciona la TV física y el perfil Samsung que contiene su DUID (en esta prueba, `TCPlaySamsungTV`), y usa **Run Project**. Para leer el diagnóstico, usa **Debug Project** y el comando anterior en Console. Comprueba que Willax arranque al iniciar sesión y cambia a otros canales visibles; compara `channelSwitch` para distinguir ahorro de consulta de demora del stream. Mantén los otros reproductores de la cuenta cerrados por su límite de conexiones simultáneas.
+
 En HTML5, el diagnóstico indica `renderer: html5-contain`, dimensiones del video de origen, estado del medio, milisegundos de buffer por delante y contadores de frames totales/descartados cuando el motor los ofrece. Si no hay rangos de buffer expuestos, `bufferedAheadMs` es `null`; si los frames totales permanecen en cero, `frameQuality` es `null`. Esas métricas ausentes no prueban falta de datos ni ausencia de cortes. El evento `stalled` registra demora al obtener datos y no declara buffering mientras todavía puede avanzar el video. Solo `playing` da por terminada la espera iniciada por `waiting`.
 
 ### Prueba local sin Xtream ni conexión
@@ -129,7 +149,7 @@ Enciende el emulador y ejecuta `dist` con **Run Project**, sin Inspector. Pulsa 
 
 Compara también el mismo `.diagnostics/channel.ts` en un reproductor de PC que admita TS, si ya dispones de uno. Si el mismo archivo se corta solo en el emulador, eso orienta hacia su motor/host/compatibilidad. Si el archivo va fluido allí y el directo se corta, orienta hacia diferencias del flujo en vivo, su recepción o temporización. Si el archivo se corta también en PC, aún hay que distinguir problemas de la señal de los introducidos durante la captura. Ignora un posible corte al final del fragmento: la descarga se detiene sin esperar el final natural del canal.
 
-Regresa al catálogo con `npm run build -- --player-engine=html5 --stream-format=ts`. Una compilación normal no incluye el fragmento capturado. La validación en una TV Samsung física continúa pendiente antes de distribuir.
+Regresa al catálogo con `npm run build -- --player-engine=html5 --stream-format=ts`. Una compilación normal no incluye el fragmento capturado. La captura real falló en el equipo del usuario antes de seleccionar canal; la causa queda pendiente de investigar. La prueba física posterior sí mostró reproducción fluida, según su reporte, con HTML5/TS.
 
 Compara vista previa y pantalla completa, y prueba otro canal. Para descartar sesiones antiguas de depuración, reinicia el emulador y usa Run Project. Si continúa, compara el mismo canal en otro reproductor, deteniendo primero la reproducción en el emulador para no abrir conexiones simultáneas de la cuenta. El diagnóstico ayuda a distinguir buffering de problemas de renderizado/decodificación; el avance del reloj no prueba que audio y video estén bien. La fluidez y compatibilidad final deben comprobarse en un televisor real.
 
@@ -139,7 +159,7 @@ El código que corre en TV tiene sintaxis ES5 y no requiere React, módulos ES, 
 
 Se necesita medir en televisores antiguos y recientes: teclado virtual, foco, Return, canales, audio/video, buffering, retorno desde Home, tamaño del plano de video y salida. Probar HLS real de Xtream y acceso directo desde la red del cliente; redirecciones, TLS, codecs y características del manifiesto pueden variar por modelo. No se convierte un stream incompatible a través de proxy: se muestra un error y permite reintentar.
 
-Las pruebas automatizadas verifican API simulada, carreras de solicitudes, navegación de la interfaz en jsdom y AVPlay simulado. No hubo conexión a Xtream, ejecución en SDK/TV real ni generación/firma de WGT en este entorno. No es una entrega lista para tienda. Favoritos, EPG, VOD, sesión persistente y mejoras finales de diseño quedan para siguientes entregas.
+Las pruebas automatizadas verifican API simulada, autoplay de Willax, preparación/caducidad/aislamiento de URLs, carreras de solicitudes, navegación de la interfaz en jsdom y AVPlay simulado. En este entorno no hubo conexión a Xtream, ejecución en SDK/TV real ni generación/firma de WGT; la instalación y prueba física descritas fueron realizadas por el usuario. La nueva mejora de autoplay/cambio requiere repetir esa prueba. No es una entrega lista para tienda. Favoritos, EPG, VOD, sesión persistente y mejoras finales de diseño quedan para siguientes entregas.
 
 ## Referencias oficiales
 

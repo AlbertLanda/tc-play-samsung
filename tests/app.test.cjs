@@ -22,12 +22,14 @@ function mount(t) {
   w.eval(source('core.js')); w.eval(source('app.js'));
   const el = id => w.document.getElementById(id);
   const key = code => w.document.dispatchEvent(new w.KeyboardEvent('keydown', { keyCode: code, bubbles: true, cancelable: true }));
-  function login() {
+  function login(catalog) {
     el('username').value = 'test'; el('password').value = 'secret';
     el('login-form').dispatchEvent(new w.Event('submit', { cancelable: true }));
     requests[0].reply({ success: true });
     requests[1].reply({ success: true, categories: [{ id: 1, name: 'Noticias' }, { id: 2, name: 'Deportes' }] });
-    requests[2].reply({ success: true, channels: [{ id: 10, name: 'Canal 10' }, { id: 11, name: 'Canal 11' }] });
+    requests[2].reply({ success: true, channels: catalog || [
+      { id: 10, name: 'WILLAX', category_id: 1 }, { id: 11, name: 'Canal 11', category_id: 1 }
+    ] });
   }
   return { w, el, key, requests, plays, rectangles, login, stops: () => stops };
 }
@@ -48,11 +50,15 @@ test('preview excluye borde; fullscreen y Return cambian rectángulo sin reinici
   assert.deepEqual(JSON.parse(JSON.stringify(h.rectangles.at(-1).rect)), preview);
   assert.equal(h.plays.length, 1);
 });
-test('login carga catálogo sin iniciar video y borra contraseña del formulario', t => {
+test('login selecciona Willax y solicita reproducción automática; credenciales solo en memoria', t => {
   const h = mount(t); h.login();
   assert.equal(h.el('home-screen').classList.contains('hidden'), false);
   assert.equal(h.el('password').value, ''); assert.equal(h.plays.length, 0);
-  assert.equal(h.requests.length, 3);
+  assert.equal(h.requests.length, 4);
+  assert.equal(h.requests[3].body.stream_id, '10');
+  assert.equal(h.el('channel-title').textContent, 'WILLAX');
+  h.requests[3].reply({ success: true, stream_url: 'https://xtream.invalid/willax.ts' });
+  assert.equal(h.plays.length, 1);
   assert.equal(h.w.localStorage.length, 0); assert.equal(h.w.sessionStorage.length, 0);
 });
 test('OK en canal pide URL directa, fullscreen y Atrás vuelven al catálogo', t => {
@@ -73,9 +79,10 @@ test('cerrar sesión cancela URL pendiente y no permite video tardío', t => {
 });
 test('cambio rápido de categoría ignora listado anterior', t => {
   const h = mount(t); h.login();
-  h.el('categories').firstChild.click(); h.el('categories').lastChild.click();
-  h.requests[3].reply({ success: true, channels: [{ id: 99, name: 'Viejo' }] });
-  h.requests[4].reply({ success: true, channels: [{ id: 100, name: 'Actual' }] });
+  h.el('reload').click(); const old = h.requests.at(-1);
+  h.el('categories').lastChild.click(); h.el('reload').click(); const current = h.requests.at(-1);
+  old.reply({ success: true, channels: [{ id: 99, name: 'Viejo' }] });
+  current.reply({ success: true, channels: [{ id: 100, name: 'Actual' }] });
   assert.equal(h.el('channels').textContent, 'Actual'); assert.equal(h.plays.length, 0);
 });
 test('CH+ cambia de canal y no usa endpoints de proxy', t => {
@@ -85,7 +92,8 @@ test('CH+ cambia de canal y no usa endpoints de proxy', t => {
 });
 test('catálogo inserta nombres como texto y pagina listas extensas', t => {
   const h = mount(t); h.login(); h.el('categories').lastChild.click();
-  h.requests[3].reply({ success: true, channels: Array.from({ length: 100 }, (_, id) => ({ id, name: id === 0 ? '<img onerror="bad()">' : 'Canal ' + id })) });
+  h.el('reload').click();
+  h.requests.at(-1).reply({ success: true, channels: Array.from({ length: 100 }, (_, id) => ({ id, name: id === 0 ? '<img onerror="bad()">' : 'Canal ' + id })) });
   assert.equal(h.el('channels').children.length, 12); assert.equal(h.el('channels').querySelector('img'), null);
   h.el('next-page').click(); assert.equal(h.el('page-label').textContent, '2 / 9');
 });
@@ -102,4 +110,73 @@ test('Atrás abre diálogo y cancelar conserva sesión y foco', t => {
   assert.equal(h.el('exit-dialog').classList.contains('hidden'), false);
   h.key(10009); assert.equal(h.el('exit-dialog').classList.contains('hidden'), true);
   assert.equal(h.w.document.activeElement.id, 'logout');
+});
+test('Willax fuera de primera categoría/página inicia solo y muestra su fila seleccionada', t => {
+  const h = mount(t);
+  h.login([
+    { id: 8, name: 'Noticias', category_id: 1 },
+    ...Array.from({ length: 15 }, (_, id) => ({ id: id + 100, name: 'Sports ' + id, category_id: '2' })),
+    { id: 200, name: 'Willax HD', category_id: '2' },
+    { id: 201, name: ' willax ', category_id: '2' }
+  ]);
+  assert.equal(h.requests[3].body.stream_id, '201');
+  assert.equal(h.el('category-title').textContent, 'Deportes');
+  assert.equal(h.el('page-label').textContent, '2 / 2');
+  assert.equal(h.el('channels').querySelector('.selected').getAttribute('data-channel'), '201');
+});
+test('sin Willax usa primer canal disponible y categorías cacheadas evitan nuevas consultas', t => {
+  const h = mount(t); h.login([{ id: 20, name: 'Deporte', category_id: 2 }]);
+  assert.equal(h.requests[3].body.stream_id, '20');
+  const count = h.requests.length;
+  h.el('categories').firstChild.click(); h.el('categories').lastChild.click();
+  assert.equal(h.requests.length, count);
+  assert.equal(h.el('channels').textContent, 'Deporte');
+});
+test('catálogo global fallido conserva listado por categoría y autoplay de Willax', t => {
+  const h = mount(t);
+  h.el('username').value = 'test'; h.el('password').value = 'secret';
+  h.el('login-form').dispatchEvent(new h.w.Event('submit', { cancelable: true }));
+  h.requests[0].reply({ success: true });
+  h.requests[2].reply({ success: false, error_code: 'network' });
+  h.requests[1].reply({ success: true, categories: [{ id: 1, name: 'Nacionales' }] });
+  assert.equal(h.requests[3].body.category_id, '1');
+  h.requests[3].reply({ success: true, channels: [{ id: 5, name: 'WILLAX' }] });
+  assert.equal(h.requests[4].body.stream_id, '5');
+});
+test('logout durante catálogo impide autoplay tardío y limpia cache para próximo login', t => {
+  const h = mount(t);
+  h.el('username').value = 'test'; h.el('password').value = 'secret';
+  h.el('login-form').dispatchEvent(new h.w.Event('submit', { cancelable: true }));
+  h.requests[0].reply({ success: true }); h.el('logout').click();
+  h.requests[1].reply({ success: true, categories: [{ id: 1, name: 'N' }] });
+  h.requests[2].reply({ success: true, channels: [{ id: 5, name: 'WILLAX', category_id: 1 }] });
+  assert.equal(h.requests.length, 3); assert.equal(h.plays.length, 0);
+});
+test('OK repetido en canal actual no reinicia; Reintentar solicita URL fresca', t => {
+  const h = mount(t); h.login();
+  h.el('channels').firstChild.click(); assert.equal(h.requests.length, 4);
+  h.requests[3].reply({ success: true, stream_url: 'https://xtream.invalid/willax.ts' });
+  h.plays[0].callbacks.ready();
+  const requests = h.requests.length, stops = h.stops();
+  h.el('channels').firstChild.click();
+  assert.equal(h.requests.length, requests); assert.equal(h.stops(), stops);
+  h.el('retry').click();
+  assert.equal(h.requests.at(-1).body.stream_id, '10');
+  assert.equal(h.requests.at(-2).aborted, true);
+});
+test('canal visible preparado cambia sin nueva consulta ni un segundo video simultáneo', t => {
+  const h = mount(t); h.login();
+  h.requests[3].reply({ success: true, stream_url: 'https://xtream.invalid/willax.ts' });
+  h.plays[0].callbacks.ready();
+  assert.equal(h.requests[4].body.stream_id, '11');
+  h.requests[4].reply({ success: true, stream_url: 'https://xtream.invalid/11.ts' });
+  assert.equal(h.plays.length, 1);
+  h.el('channels').lastChild.click();
+  assert.equal(h.requests.length, 5); assert.equal(h.plays.length, 2);
+  assert.equal(h.w.TCPlayApp.getChannelSwitchDiagnostics().urlSource, 'prepared');
+});
+test('catálogo vacío no intenta abrir canales ni inventa identificador de Willax', t => {
+  const h = mount(t); h.login([]);
+  assert.equal(h.requests.length, 3); assert.equal(h.plays.length, 0);
+  assert.match(h.el('catalogue-status').textContent, /No hay canales/);
 });
