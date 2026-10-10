@@ -204,7 +204,9 @@
         if (!completed && current()) request = pending;
       }
     }
-    return { play: play, stop: stop, prepare: prepare, isActive: function () { return active; },
+    // Cancel a channel selection without discarding the session's prepared URLs.
+    // Full session/background cleanup still uses stop().
+    return { play: play, stop: stop, cancel: release, prepare: prepare, isActive: function () { return active; },
       getDiagnostics: function () {
         return { urlSource: switchStats.urlSource, urlResolutionMs: switchStats.urlResolutionMs,
           playerStartupMs: switchStats.playerStartupMs, totalStartupMs: switchStats.totalStartupMs };

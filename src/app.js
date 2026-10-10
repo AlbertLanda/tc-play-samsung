@@ -8,6 +8,9 @@
   var requests = [], fullscreen = false, dialogOpen = false, previousFocus = null;
   var overlayTimer = null, playbackState = 'idle', loginBusy = false;
   var categoryCache = {}, startupPending = false;
+  var currentCategory = null, selectedCategory = null;
+  var zapTimer = null, zapRequest = null, zapSequence = 0;
+  var zapQueue = 0, zapBusy = false, zapActive = false;
   function el(id) { return document.getElementById(id); }
   function text(id, value) { el(id).textContent = value; }
   function hide(id, value) { el(id).classList[value ? 'add' : 'remove']('hidden'); }
@@ -97,6 +100,10 @@
   }
   function setFullscreen(value) {
     if (value && !selected) return;
+    if (!value && zapActive) {
+      cancelZap();
+      if (credentials && selected) selectChannel(selected);
+    }
     fullscreen = value;
     document.body.classList[value ? 'add' : 'remove']('fullscreen');
     clearTimeout(overlayTimer);
@@ -142,26 +149,104 @@
     });
     return exact || variant || items[0] || null;
   }
-  function selectChannel(channel, retry) {
-    if (!retry && selected && String(selected.id) === String(channel.id) &&
-        (playbackState === 'playing' || playbackState === 'loading')) return;
+  function showChannel(channel, category) {
     selected = channel;
-    playbackState = 'loading';
+    selectedCategory = category || currentCategory;
+    if (selectedCategory && selectedCategory !== currentCategory) loadChannels(selectedCategory);
     var index = channels.indexOf(channel);
     if (index >= 0 && Math.floor(index / pageSize) !== page) {
       page = Math.floor(index / pageSize); renderChannels();
     }
     text('channel-title', channel.name); text('fullscreen-title', channel.name);
+    text('fullscreen-category', selectedCategory ? selectedCategory.name : '');
     var nodes = el('channels').querySelectorAll('button');
     Array.prototype.forEach.call(nodes, function (node) {
       node.classList[node.getAttribute('data-channel') === String(channel.id) ? 'add' : 'remove']('selected');
     });
     positionPlayer();
+  }
+  function selectChannel(channel, retry) {
+    cancelZap();
+    if (!retry && selected && String(selected.id) === String(channel.id) &&
+        (playbackState === 'playing' || playbackState === 'loading')) return;
+    playbackState = 'loading';
+    showChannel(channel, channels.indexOf(channel) >= 0 ? currentCategory : selectedCategory);
     playback.play(credentials, channel, retry === true);
+  }
+  function cancelZap() {
+    clearTimeout(zapTimer); zapTimer = null;
+    zapSequence += 1;
+    if (zapRequest) zapRequest.abort();
+    zapRequest = null; zapQueue = 0; zapBusy = false; zapActive = false;
+  }
+  function finishZap() {
+    if (!zapActive || zapBusy || zapQueue || !credentials) return;
+    clearTimeout(zapTimer);
+    zapTimer = setTimeout(function () {
+      if (zapActive && credentials && selected) selectChannel(selected);
+    }, 350);
+  }
+  function nextFullscreenChannel() {
+    if (!fullscreen || !credentials || !selected || !categories.length) return;
+    if (!zapActive) { playback.cancel(); zapActive = true; }
+    clearTimeout(zapTimer);
+    playbackState = 'choosing';
+    zapQueue += 1;
+    advanceZap();
+  }
+  function advanceZap() {
+    if (zapBusy || !zapQueue || !zapActive) return;
+    zapBusy = true;
+    var ticket = zapSequence;
+    var categoryIndex = categories.indexOf(selectedCategory);
+    if (categoryIndex < 0) categoryIndex = 0;
+    function visit(index, first, visited) {
+      if (ticket !== zapSequence || !credentials) return;
+      var category = categories[index], cached = categoryCache['$' + category.id];
+      function complete(err, data) {
+        if (ticket !== zapSequence || !credentials) return;
+        zapRequest = null;
+        var items = !err && validItems(data.channels);
+        if (!items) {
+          cancelZap(); playbackState = 'idle';
+          text('fullscreen-status', err ? err.message : TCPlay.message('response'));
+          text('playback-status', 'Presiona Reintentar canal para continuar.');
+          showOverlay(); return;
+        }
+        categoryCache['$' + category.id] = items;
+        var position = -1;
+        if (first) items.forEach(function (channel, i) {
+          if (String(channel.id) === String(selected.id)) position = i;
+        });
+        if (position + 1 < items.length) {
+          showChannel(items[position + 1], category);
+          text('fullscreen-status', 'Suelta la flecha para reproducir este canal.');
+          text('playback-status', 'Seleccionando canal…'); showOverlay();
+          zapQueue -= 1; zapBusy = false;
+          if (zapQueue) advanceZap(); else finishZap();
+        } else if (visited < categories.length) {
+          visit((index + 1) % categories.length, false, visited + 1);
+        } else {
+          cancelZap(); playbackState = 'idle';
+          text('fullscreen-status', 'No hay canales disponibles.'); showOverlay();
+        }
+      }
+      if (cached) complete(null, { channels: cached });
+      else {
+        text('fullscreen-status', 'Cargando canales de ' + category.name + '…'); showOverlay();
+        var completed = false;
+        var request = api.post('live/streams', authBody({ category_id: String(category.id) }), function (err, data) {
+          completed = true; complete(err, data);
+        });
+        if (!completed) zapRequest = request;
+      }
+    }
+    visit(categoryIndex, true, 0);
   }
   function loadChannels(category, first, refresh) {
     abortRequests();
     var ticket = categorySequence;
+    currentCategory = category;
     page = 0; channels = []; renderChannels();
     text('category-title', category.name); text('catalogue-status', 'Cargando canales…');
     el('reload').onclick = function () { loadChannels(category, false, true); };
@@ -185,6 +270,7 @@
     else post('live/streams', authBody({ category_id: String(category.id) }), complete);
   }
   function loadCategories() {
+    cancelZap();
     abortRequests();
     var ticket = categorySequence;
     categoryCache = {};
@@ -255,9 +341,10 @@
   };
   function logout() {
     loginSequence += 1; loginBusy = false; el('login-button').disabled = false;
-    abortRequests(); playback.stop();
+    cancelZap(); abortRequests(); playback.stop();
     categoryCache = {}; startupPending = false;
     setFullscreen(false); credentials = null; selected = null; channels = []; categories = [];
+    currentCategory = null; selectedCategory = null;
     el('categories').textContent = ''; renderChannels();
     text('channel-title', 'Elige un canal');
     text('playback-status', 'Selecciona un canal y presiona OK para reproducir.');
@@ -293,7 +380,7 @@
   el('next-page').onclick = function () { if ((page + 1) * pageSize < channels.length) { page += 1; renderChannels(); focus(el('channels').firstChild); } };
   el('cancel-exit').onclick = closeExit;
   el('confirm-exit').onclick = function () {
-    abortRequests(); loginSequence += 1; playback.stop(); categoryCache = {}; startupPending = false;
+    cancelZap(); abortRequests(); loginSequence += 1; playback.stop(); categoryCache = {}; startupPending = false;
     credentials = null; el('password').value = '';
     platform.exit();
   };
@@ -301,6 +388,9 @@
     var code = event.keyCode || event.which, action = platform.keyAction(code);
     if (action === 'back' || code === 27) { event.preventDefault(); back(); return; }
     if (dialogOpen && action) { event.preventDefault(); return; }
+    if (fullscreen && !dialogOpen && code === 39) {
+      event.preventDefault(); nextFullscreenChannel(); return;
+    }
     if (action === 'next' || action === 'previous') {
       event.preventDefault(); zap(action === 'next' ? 1 : -1); return;
     }
@@ -315,6 +405,7 @@
   });
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
+      cancelZap();
       abortRequests(); loginSequence += 1; loginBusy = false; el('login-button').disabled = false;
       startupPending = false;
       playback.stop();
@@ -326,7 +417,7 @@
     } else { positionPlayer(); showOverlay(); }
   });
   window.addEventListener('pagehide', function () {
-    abortRequests(); playback.stop(); categoryCache = {}; startupPending = false; credentials = null;
+    cancelZap(); abortRequests(); playback.stop(); categoryCache = {}; startupPending = false; credentials = null;
   });
   window.addEventListener('resize', positionPlayer);
   platform.init(); text('platform-label', platform.label);
