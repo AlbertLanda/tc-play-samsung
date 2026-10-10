@@ -10,7 +10,7 @@
   var categoryCache = {}, startupPending = false;
   var currentCategory = null, selectedCategory = null;
   var zapTimer = null, zapRequest = null, zapSequence = 0;
-  var zapQueue = 0, zapBusy = false, zapActive = false;
+  var zapQueue = [], zapBusy = false, zapActive = false;
   function el(id) { return document.getElementById(id); }
   function text(id, value) { el(id).textContent = value; }
   function hide(id, value) { el(id).classList[value ? 'add' : 'remove']('hidden'); }
@@ -177,26 +177,27 @@
     clearTimeout(zapTimer); zapTimer = null;
     zapSequence += 1;
     if (zapRequest) zapRequest.abort();
-    zapRequest = null; zapQueue = 0; zapBusy = false; zapActive = false;
+    zapRequest = null; zapQueue = []; zapBusy = false; zapActive = false;
   }
   function finishZap() {
-    if (!zapActive || zapBusy || zapQueue || !credentials) return;
+    if (!zapActive || zapBusy || zapQueue.length || !credentials) return;
     clearTimeout(zapTimer);
     zapTimer = setTimeout(function () {
       if (zapActive && credentials && selected) selectChannel(selected);
     }, 350);
   }
-  function nextFullscreenChannel() {
+  function stepFullscreenChannel(direction) {
     if (!fullscreen || !credentials || !selected || !categories.length) return;
     if (!zapActive) { playback.cancel(); zapActive = true; }
     clearTimeout(zapTimer);
     playbackState = 'choosing';
-    zapQueue += 1;
+    zapQueue.push(direction);
     advanceZap();
   }
   function advanceZap() {
-    if (zapBusy || !zapQueue || !zapActive) return;
+    if (zapBusy || !zapQueue.length || !zapActive) return;
     zapBusy = true;
+    var direction = zapQueue.shift();
     var ticket = zapSequence;
     var categoryIndex = categories.indexOf(selectedCategory);
     if (categoryIndex < 0) categoryIndex = 0;
@@ -218,14 +219,15 @@
         if (first) items.forEach(function (channel, i) {
           if (String(channel.id) === String(selected.id)) position = i;
         });
-        if (position + 1 < items.length) {
-          showChannel(items[position + 1], category);
+        var target = first && position >= 0 ? position + direction : (direction > 0 ? 0 : items.length - 1);
+        if (target >= 0 && target < items.length) {
+          showChannel(items[target], category);
           text('fullscreen-status', 'Suelta la flecha para reproducir este canal.');
           text('playback-status', 'Seleccionando canal…'); showOverlay();
-          zapQueue -= 1; zapBusy = false;
-          if (zapQueue) advanceZap(); else finishZap();
+          zapBusy = false;
+          if (zapQueue.length) advanceZap(); else finishZap();
         } else if (visited < categories.length) {
-          visit((index + 1) % categories.length, false, visited + 1);
+          visit((index + direction + categories.length) % categories.length, false, visited + 1);
         } else {
           cancelZap(); playbackState = 'idle';
           text('fullscreen-status', 'No hay canales disponibles.'); showOverlay();
@@ -388,8 +390,8 @@
     var code = event.keyCode || event.which, action = platform.keyAction(code);
     if (action === 'back' || code === 27) { event.preventDefault(); back(); return; }
     if (dialogOpen && action) { event.preventDefault(); return; }
-    if (fullscreen && !dialogOpen && code === 39) {
-      event.preventDefault(); nextFullscreenChannel(); return;
+    if (fullscreen && !dialogOpen && (code === 37 || code === 39)) {
+      event.preventDefault(); stepFullscreenChannel(code === 39 ? 1 : -1); return;
     }
     if (action === 'next' || action === 'previous') {
       event.preventDefault(); zap(action === 'next' ? 1 : -1); return;

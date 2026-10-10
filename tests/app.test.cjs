@@ -202,11 +202,11 @@ const orderedCatalog = [
   { id: 20, name: 'Deportes 1', category_id: 2 },
   { id: 21, name: 'Deportes 2', category_id: 2 }
 ];
-test('derecha en vista previa o diálogo no cambia canal', t => {
+test('izquierda/derecha en vista previa o diálogo no cambian canal', t => {
   const h = mount(t, true); h.login(orderedCatalog);
-  h.el('fullscreen').focus(); h.key(39); h.advance(350);
+  h.el('fullscreen').focus(); h.key(39); h.key(37); h.advance(350);
   assert.equal(h.el('channel-title').textContent, 'WILLAX'); assert.equal(h.requests.length, 4);
-  h.key(10009); h.key(39); h.advance(350);
+  h.key(10009); h.key(39); h.key(37); h.advance(350);
   assert.equal(h.el('channel-title').textContent, 'WILLAX'); assert.equal(h.requests.length, 4);
   assert.equal(h.el('exit-dialog').classList.contains('hidden'), false);
 });
@@ -332,5 +332,68 @@ test('CH+ durante selección reemplaza temporizador y no inicia un canal extra',
   const h = mount(t, true); h.login(orderedCatalog); h.el('fullscreen').click();
   h.key(39); h.key(39); h.key(427);
   assert.equal(h.requests.at(-1).body.stream_id, '21');
+  const count = h.requests.length; h.advance(350); assert.equal(h.requests.length, count);
+});
+
+test('izquierda fullscreen retrocede, cruza categorías y conecta extremos del catálogo', t => {
+  const h = mount(t, true); h.login(orderedCatalog); h.el('fullscreen').click();
+  for (const [name, category] of [['Deportes 2', 'Deportes'], ['Deportes 1', 'Deportes'], ['Noticias 2', 'Noticias'], ['WILLAX', 'Noticias']]) {
+    h.key(37);
+    assert.equal(h.el('fullscreen-title').textContent, name);
+    assert.equal(h.el('fullscreen-category').textContent, category);
+    assert.equal(h.el('player-overlay').classList.contains('hidden'), false);
+  }
+  assert.equal(h.requests.length, 4); assert.equal(h.requests[3].aborted, true);
+  h.advance(350); assert.equal(h.requests.at(-1).body.stream_id, '10');
+});
+test('izquierda omite categorías vacías y elige último canal de la anterior', t => {
+  const h = mount(t, true);
+  h.login([orderedCatalog[0], { id: 30, name: 'Primero deportes', category_id: 3 }, { id: 31, name: 'Último deportes', category_id: 3 }], [
+    { id: 1, name: 'Noticias' }, { id: 2, name: 'Vacía' }, { id: 3, name: 'Deportes' }, { id: 4, name: 'Vacía final' }
+  ]);
+  h.el('fullscreen').click(); h.key(37); assert.equal(h.el('fullscreen-title').textContent, 'Último deportes');
+  h.key(37); assert.equal(h.el('fullscreen-title').textContent, 'Primero deportes');
+  h.key(37); assert.equal(h.el('fullscreen-title').textContent, 'WILLAX');
+  h.advance(350); assert.equal(h.requests.at(-1).body.stream_id, '10');
+});
+test('alternar izquierda/derecha cambia nombre inmediatamente y espera última pulsación', t => {
+  const h = mount(t, true); h.login(orderedCatalog); h.el('fullscreen').click();
+  h.key(39); assert.equal(h.el('fullscreen-title').textContent, 'Noticias 2');
+  h.advance(300); h.key(37); assert.equal(h.el('fullscreen-title').textContent, 'WILLAX');
+  h.advance(300); h.key(37); assert.equal(h.el('fullscreen-title').textContent, 'Deportes 2');
+  h.advance(349); assert.equal(h.requests.length, 4);
+  h.advance(1); assert.equal(h.requests.at(-1).body.stream_id, '21');
+  h.requests.at(-1).reply({ success: true, stream_url: 'https://xtream.invalid/final-left.ts' });
+  assert.deepEqual(h.plays.map(p => p.url), ['https://xtream.invalid/final-left.ts']);
+});
+test('consulta de categoría conserva orden de pulsaciones con direcciones mezcladas', t => {
+  const h = mount(t, true); fallbackLogin(h);
+  h.key(37); const categoryRequest = h.requests.at(-1);
+  assert.equal(categoryRequest.body.category_id, '2');
+  h.key(39); h.key(39);
+  assert.equal(h.requests.length, 6);
+  categoryRequest.reply({ success: true, channels: [{ id: 20, name: 'Deporte A' }, { id: 21, name: 'Deporte B' }] });
+  assert.equal(h.el('fullscreen-title').textContent, 'Deporte A');
+  assert.equal(h.requests.length, 6); h.advance(350);
+  assert.equal(h.requests.at(-1).body.stream_id, '20');
+});
+test('izquierda cancela conexión pendiente de derecha y no reproduce respuesta tardía', t => {
+  const h = mount(t, true); h.login(orderedCatalog); h.el('fullscreen').click();
+  h.key(39); h.advance(350); const old = h.requests.at(-1);
+  h.key(37); assert.equal(old.aborted, true);
+  assert.equal(h.el('fullscreen-title').textContent, 'WILLAX');
+  old.reply({ success: true, stream_url: 'https://xtream.invalid/old-right.ts' });
+  h.advance(350); assert.equal(h.requests.at(-1).body.stream_id, '10');
+  h.requests.at(-1).reply({ success: true, stream_url: 'https://xtream.invalid/willax.ts' });
+  assert.deepEqual(h.plays.map(p => p.url), ['https://xtream.invalid/willax.ts']);
+});
+test('retroceso al catálogo final conserva última página y canal al volver a miniatura', t => {
+  const h = mount(t, true);
+  h.login([orderedCatalog[0], ...Array.from({ length: 14 }, (_, i) => ({ id: 100 + i, name: 'Canal ' + i, category_id: 2 }))]);
+  h.el('fullscreen').click(); h.key(37); h.key(10009);
+  assert.equal(h.el('channel-title').textContent, 'Canal 13');
+  assert.equal(h.el('category-title').textContent, 'Deportes'); assert.equal(h.el('page-label').textContent, '2 / 2');
+  assert.equal(h.el('channels').querySelector('.selected').getAttribute('data-channel'), '113');
+  assert.equal(h.requests.at(-1).body.stream_id, '113');
   const count = h.requests.length; h.advance(350); assert.equal(h.requests.length, count);
 });
