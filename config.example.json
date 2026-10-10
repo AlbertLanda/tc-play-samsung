@@ -1,5 +1,7 @@
 {
   "apiBaseUrl": "",
+  "playerEngine": "avplay",
+  "streamFormat": "m3u8",
   "requestTimeoutMs": 15000,
   "playbackTimeoutMs": 20000
 }

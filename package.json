@@ -5,6 +5,7 @@
   "scripts": {
     "build": "node scripts/build.cjs",
     "start": "node scripts/serve.cjs",
+    "capture-test": "node scripts/capture-channel.cjs",
     "test": "node --test tests/*.test.cjs"
   },
   "engines": {

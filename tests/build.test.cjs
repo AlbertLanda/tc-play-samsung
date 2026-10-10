@@ -1,0 +1,86 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const vm = require('node:vm');
+
+test('build renueva archivos y paquetes antiguos sin borrar la carpeta dist abierta', t => {
+  const project = path.join(__dirname, '..');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tcplay-build-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.cpSync(path.join(project, 'src'), path.join(root, 'src'), { recursive: true });
+  fs.cpSync(path.join(project, 'platform'), path.join(root, 'platform'), { recursive: true });
+  fs.copyFileSync(path.join(project, 'config.example.json'), path.join(root, 'config.example.json'));
+  fs.writeFileSync(path.join(root, 'config.local.json'), JSON.stringify({
+    apiBaseUrl: 'https://api.invalid', requestTimeoutMs: 15000, playbackTimeoutMs: 20000
+  }));
+  const dist = path.join(root, 'dist');
+  fs.mkdirSync(path.join(dist, 'Debug'), { recursive: true });
+  fs.writeFileSync(path.join(dist, 'Debug', 'dist.wgt'), 'old package');
+  fs.writeFileSync(path.join(dist, 'core.js'), 'old code');
+  fs.writeFileSync(path.join(dist, 'obsolete.js'), 'old asset');
+  const guardedFs = { ...fs, rmSync(target, options) {
+    // Windows may deny removing a directory used by an open editor or shell.
+    if (path.resolve(target) === dist) {
+      const error = new Error('EPERM: dist is open');
+      error.code = 'EPERM';
+      throw error;
+    }
+    return fs.rmSync(target, options);
+  } };
+  const source = fs.readFileSync(path.join(project, 'scripts/build.cjs'), 'utf8');
+  function build(args = []) {
+    vm.runInNewContext(source, {
+      __dirname: path.join(root, 'scripts'), console: { log() {} },
+      process: { argv: ['node', 'build.cjs', ...args] },
+      require(name) { return name === 'node:fs' ? guardedFs : require(name); }
+    });
+  }
+  build();
+  build();
+  assert.equal(fs.existsSync(path.join(dist, 'Debug')), false);
+  assert.equal(fs.existsSync(path.join(dist, 'obsolete.js')), false);
+  assert.equal(fs.readFileSync(path.join(dist, 'core.js'), 'utf8'),
+    fs.readFileSync(path.join(root, 'src/core.js'), 'utf8'));
+  assert.match(fs.readFileSync(path.join(dist, 'config.js'), 'utf8'), /https:\/\/api\.invalid/);
+  assert.match(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /\$WEBAPIS\/webapis\/webapis\.js/);
+  assert.equal(fs.readFileSync(path.join(root, 'config.local.json'), 'utf8'),
+    JSON.stringify({ apiBaseUrl: 'https://api.invalid', requestTimeoutMs: 15000, playbackTimeoutMs: 20000 }));
+  const generated = () => JSON.parse(fs.readFileSync(path.join(dist, 'config.js'), 'utf8').replace(/^window.TCPLAY_CONFIG = /, '').trim().slice(0, -1));
+  assert.equal(generated().playerEngine, 'avplay');
+  assert.equal(generated().streamFormat, 'm3u8');
+  build(['--player-engine=html5', '--stream-format=ts']);
+  assert.equal(generated().playerEngine, 'html5'); assert.equal(generated().streamFormat, 'ts');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'config.local.json'), 'utf8')).streamFormat, undefined);
+  build(); assert.equal(generated().streamFormat, 'm3u8');
+  build(['--player-engine=html5']);
+  assert.equal(generated().playerEngine, 'html5'); assert.equal(generated().apiBaseUrl, 'https://api.invalid');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'config.local.json'), 'utf8')).playerEngine, undefined);
+  build(); assert.equal(generated().playerEngine, 'avplay');
+  build(['--playback-test']);
+  assert.equal(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), fs.readFileSync(path.join(root, 'src/playback-test.html'), 'utf8'));
+  assert.ok(fs.statSync(path.join(dist, 'assets/playback-test.mp4')).size > 0);
+  assert.doesNotMatch(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /src="(?:config|core|app|platform)\.js"/);
+  build(['--player-engine=html5']);
+  assert.match(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /id="login-screen"/);
+  assert.equal(generated().playerEngine, 'html5');
+  const before = fs.readFileSync(path.join(dist, 'index.html'), 'utf8');
+  assert.throws(() => build(['--playback-test=channel']), /capture-test/);
+  assert.equal(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), before);
+  fs.mkdirSync(path.join(root, '.diagnostics'));
+  const captured = Buffer.from('fixture-only-ts');
+  fs.writeFileSync(path.join(root, '.diagnostics/channel.ts'), captured);
+  build(['--playback-test=channel']);
+  assert.deepEqual(fs.readFileSync(path.join(dist, 'assets/channel-test.ts')), captured);
+  assert.match(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /data-test-source="captured-ts" src="assets\/channel-test.ts"/);
+  assert.doesNotMatch(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), /src="(?:config|core|app|platform)\.js"/);
+  build(['--player-engine=html5']);
+  assert.equal(fs.existsSync(path.join(dist, 'assets/channel-test.ts')), false);
+  assert.throws(() => build(['--player-engine=bad']), /Usa --player-engine/);
+  assert.throws(() => build(['--stream-format=mp4']), /Usa --player-engine/);
+  fs.writeFileSync(path.join(root, 'config.local.json'), JSON.stringify({ streamFormat: 'bad' }));
+  assert.throws(() => build(), /streamFormat debe ser/);
+  fs.writeFileSync(path.join(root, 'config.local.json'), JSON.stringify({ playerEngine: 'bad' }));
+  assert.throws(() => build(), /playerEngine debe ser/);
+});
