@@ -2,6 +2,7 @@
 <widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="https://telecable.pe/tcplay/samsung" version="0.1.0" viewmodes="maximized">
   <tizen:application id="TcPlayTV01.TCPlay" package="TcPlayTV01" required_version="2.3"/>
   <content src="index.html"/>
+  <feature name="http://tizen.org/feature/screen.size.all"/>
   <icon src="assets/icon.png"/>
   <name>TC Play</name>
   <access origin="*" subdomains="true"/>

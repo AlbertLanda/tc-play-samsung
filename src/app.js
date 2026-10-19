@@ -7,6 +7,10 @@
   var page = 0, pageSize = 12, categorySequence = 0, loginSequence = 0;
   var requests = [], fullscreen = false, dialogOpen = false, previousFocus = null;
   var overlayTimer = null, playbackState = 'idle', loginBusy = false;
+  var categoryCache = {}, startupPending = false;
+  var currentCategory = null, selectedCategory = null;
+  var zapTimer = null, zapRequest = null, zapSequence = 0;
+  var zapQueue = [], zapBusy = false, zapActive = false;
   function el(id) { return document.getElementById(id); }
   function text(id, value) { el(id).textContent = value; }
   function hide(id, value) { el(id).classList[value ? 'add' : 'remove']('hidden'); }
@@ -78,12 +82,17 @@
     text('playback-status', message);
     text('fullscreen-status', message);
     showOverlay();
+    if (state === 'playing') prepareUrls();
   });
+  window.TCPlayApp = { getChannelSwitchDiagnostics: function () { return playback.getDiagnostics(); } };
   function positionPlayer() {
     if (!credentials) return;
     hide('media-slot', false);
-    var rect = fullscreen ? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } :
-      el('preview-anchor').getBoundingClientRect();
+    var anchor = el('preview-anchor'), bounds = anchor.getBoundingClientRect();
+    var rect = fullscreen ? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } : {
+      left: bounds.left + anchor.clientLeft, top: bounds.top + anchor.clientTop,
+      width: anchor.clientWidth, height: anchor.clientHeight
+    };
     var slot = el('media-slot');
     slot.style.left = rect.left + 'px'; slot.style.top = rect.top + 'px';
     slot.style.width = rect.width + 'px'; slot.style.height = rect.height + 'px';
@@ -91,6 +100,10 @@
   }
   function setFullscreen(value) {
     if (value && !selected) return;
+    if (!value && zapActive) {
+      cancelZap();
+      if (credentials && selected) selectChannel(selected);
+    }
     fullscreen = value;
     document.body.classList[value ? 'add' : 'remove']('fullscreen');
     clearTimeout(overlayTimer);
@@ -120,54 +133,195 @@
     el('previous-page').disabled = page === 0;
     el('next-page').disabled = start + pageSize >= channels.length;
     text('page-label', channels.length ? String(page + 1) + ' / ' + Math.ceil(channels.length / pageSize) : '0 / 0');
+    prepareUrls();
   }
-  function selectChannel(channel) {
+  function prepareUrls() {
+    if (credentials && playbackState === 'playing') {
+      playback.prepare(credentials, channels.slice(page * pageSize, (page + 1) * pageSize));
+    }
+  }
+  function initialChannel(items) {
+    var exact = null, variant = null;
+    items.forEach(function (channel) {
+      var name = channel.name.trim().toUpperCase();
+      if (!exact && name === 'WILLAX') exact = channel;
+      if (!variant && /\bWILLAX\b/.test(name)) variant = channel;
+    });
+    return exact || variant || items[0] || null;
+  }
+  function showChannel(channel, category) {
     selected = channel;
+    selectedCategory = category || currentCategory;
+    if (selectedCategory && selectedCategory !== currentCategory) loadChannels(selectedCategory);
+    var index = channels.indexOf(channel);
+    if (index >= 0 && Math.floor(index / pageSize) !== page) {
+      page = Math.floor(index / pageSize); renderChannels();
+    }
     text('channel-title', channel.name); text('fullscreen-title', channel.name);
+    text('fullscreen-category', selectedCategory ? selectedCategory.name : '');
     var nodes = el('channels').querySelectorAll('button');
     Array.prototype.forEach.call(nodes, function (node) {
       node.classList[node.getAttribute('data-channel') === String(channel.id) ? 'add' : 'remove']('selected');
     });
     positionPlayer();
-    playback.play(credentials, channel);
   }
-  function loadChannels(category) {
+  function selectChannel(channel, retry) {
+    cancelZap();
+    if (!retry && selected && String(selected.id) === String(channel.id) &&
+        (playbackState === 'playing' || playbackState === 'loading')) return;
+    playbackState = 'loading';
+    showChannel(channel, channels.indexOf(channel) >= 0 ? currentCategory : selectedCategory);
+    playback.play(credentials, channel, retry === true);
+  }
+  function cancelZap() {
+    clearTimeout(zapTimer); zapTimer = null;
+    zapSequence += 1;
+    if (zapRequest) zapRequest.abort();
+    zapRequest = null; zapQueue = []; zapBusy = false; zapActive = false;
+  }
+  function finishZap() {
+    if (!zapActive || zapBusy || zapQueue.length || !credentials) return;
+    clearTimeout(zapTimer);
+    zapTimer = setTimeout(function () {
+      if (zapActive && credentials && selected) selectChannel(selected);
+    }, 350);
+  }
+  function stepFullscreenChannel(direction) {
+    if (!fullscreen || !credentials || !selected || !categories.length) return;
+    if (!zapActive) { playback.cancel(); zapActive = true; }
+    clearTimeout(zapTimer);
+    playbackState = 'choosing';
+    zapQueue.push(direction);
+    advanceZap();
+  }
+  function advanceZap() {
+    if (zapBusy || !zapQueue.length || !zapActive) return;
+    zapBusy = true;
+    var direction = zapQueue.shift();
+    var ticket = zapSequence;
+    var categoryIndex = categories.indexOf(selectedCategory);
+    if (categoryIndex < 0) categoryIndex = 0;
+    function visit(index, first, visited) {
+      if (ticket !== zapSequence || !credentials) return;
+      var category = categories[index], cached = categoryCache['$' + category.id];
+      function complete(err, data) {
+        if (ticket !== zapSequence || !credentials) return;
+        zapRequest = null;
+        var items = !err && validItems(data.channels);
+        if (!items) {
+          cancelZap(); playbackState = 'idle';
+          text('fullscreen-status', err ? err.message : TCPlay.message('response'));
+          text('playback-status', 'Presiona Reintentar canal para continuar.');
+          showOverlay(); return;
+        }
+        categoryCache['$' + category.id] = items;
+        var position = -1;
+        if (first) items.forEach(function (channel, i) {
+          if (String(channel.id) === String(selected.id)) position = i;
+        });
+        var target = first && position >= 0 ? position + direction : (direction > 0 ? 0 : items.length - 1);
+        if (target >= 0 && target < items.length) {
+          showChannel(items[target], category);
+          text('fullscreen-status', 'Suelta la flecha para reproducir este canal.');
+          text('playback-status', 'Seleccionando canal…'); showOverlay();
+          zapBusy = false;
+          if (zapQueue.length) advanceZap(); else finishZap();
+        } else if (visited < categories.length) {
+          visit((index + direction + categories.length) % categories.length, false, visited + 1);
+        } else {
+          cancelZap(); playbackState = 'idle';
+          text('fullscreen-status', 'No hay canales disponibles.'); showOverlay();
+        }
+      }
+      if (cached) complete(null, { channels: cached });
+      else {
+        text('fullscreen-status', 'Cargando canales de ' + category.name + '…'); showOverlay();
+        var completed = false;
+        var request = api.post('live/streams', authBody({ category_id: String(category.id) }), function (err, data) {
+          completed = true; complete(err, data);
+        });
+        if (!completed) zapRequest = request;
+      }
+    }
+    visit(categoryIndex, true, 0);
+  }
+  function loadChannels(category, first, refresh) {
     abortRequests();
     var ticket = categorySequence;
+    currentCategory = category;
     page = 0; channels = []; renderChannels();
     text('category-title', category.name); text('catalogue-status', 'Cargando canales…');
-    el('reload').onclick = function () { loadChannels(category); };
+    el('reload').onclick = function () { loadChannels(category, false, true); };
     Array.prototype.forEach.call(el('categories').querySelectorAll('button'), function (node) {
       node.classList[node.getAttribute('data-category') === String(category.id) ? 'add' : 'remove']('selected');
     });
-    post('live/streams', authBody({ category_id: String(category.id) }), function (err, data) {
+    function complete(err, data) {
       if (ticket !== categorySequence || !credentials) return;
       var items = !err && validItems(data.channels);
       if (!items) { text('catalogue-status', err ? err.message : TCPlay.message('response')); return; }
-      channels = items; renderChannels();
+      categoryCache['$' + category.id] = items;
+      channels = items;
+      var start = first && !selected ? initialChannel(channels) : null;
+      if (start) page = Math.floor(channels.indexOf(start) / pageSize);
+      renderChannels();
       text('catalogue-status', channels.length ? channels.length + ' canales disponibles' : 'No hay canales en esta categoría.');
-    });
+      if (start) { startupPending = false; selectChannel(start); }
+    }
+    var cached = categoryCache['$' + category.id];
+    if (!refresh && cached) complete(null, { channels: cached });
+    else post('live/streams', authBody({ category_id: String(category.id) }), complete);
   }
   function loadCategories() {
+    cancelZap();
     abortRequests();
     var ticket = categorySequence;
+    categoryCache = {};
+    var categoryResult = null, catalogResult = null, categoriesDone = false, catalogDone = false;
     text('catalogue-status', 'Cargando categorías…');
     el('reload').onclick = loadCategories;
-    post('live/categories', authBody(), function (err, data) {
+    function complete() {
+      if (!categoriesDone || !catalogDone) return;
       if (ticket !== categorySequence || !credentials) return;
-      var items = !err && validItems(data.categories);
-      if (!items) { text('catalogue-status', err ? err.message : TCPlay.message('response')); return; }
-      categories = items; el('categories').textContent = '';
+      if (!categoryResult.items) {
+        text('catalogue-status', categoryResult.error ? categoryResult.error.message : TCPlay.message('response')); return;
+      }
+      categories = categoryResult.items; el('categories').textContent = '';
+      if (catalogResult) {
+        categories.forEach(function (category) { categoryCache['$' + category.id] = []; });
+        catalogResult.forEach(function (channel) {
+          var list = categoryCache['$' + channel.category_id];
+          if (list) list.push(channel);
+        });
+      }
       categories.forEach(function (category) {
         var button = document.createElement('button');
         button.type = 'button'; button.textContent = category.name;
         button.setAttribute('data-category', String(category.id));
-        button.onclick = function () { loadChannels(category); };
+        button.onclick = function () { startupPending = false; loadChannels(category); };
         el('categories').appendChild(button);
       });
       if (categories.length) {
-        loadChannels(categories[0]); focus(el('categories').firstChild);
+        var preferred = startupPending && catalogResult ? initialChannel(catalogResult) : null;
+        var initial = categories[0];
+        categories.forEach(function (category) {
+          if (preferred && String(category.id) === String(preferred.category_id)) initial = category;
+        });
+        loadChannels(initial, startupPending);
+        var buttons = el('categories').querySelectorAll('button');
+        focus(buttons[categories.indexOf(initial)]);
       } else text('catalogue-status', 'Tu cuenta no tiene categorías disponibles.');
+    }
+    post('live/categories', authBody(), function (err, data) {
+      categoryResult = { error: err, items: !err && validItems(data.categories) };
+      categoriesDone = true; complete();
+    });
+    post('live/streams', authBody(), function (err, data) {
+      catalogResult = !err && validItems(data.channels);
+      // An older provider response may omit category_id: keep per-category loading.
+      if (catalogResult && catalogResult.some(function (channel) {
+        return channel.category_id === null || channel.category_id === undefined;
+      })) catalogResult = null;
+      catalogDone = true; complete();
     });
   }
   el('login-form').onsubmit = function (event) {
@@ -182,14 +336,17 @@
       loginBusy = false; el('login-button').disabled = false;
       if (err) { text('login-status', err.message); focus(el('login-button')); return; }
       credentials = candidate; el('password').value = '';
+      startupPending = true;
       text('login-status', ''); hide('login-screen', true); hide('home-screen', false);
       positionPlayer(); loadCategories();
     });
   };
   function logout() {
     loginSequence += 1; loginBusy = false; el('login-button').disabled = false;
-    abortRequests(); playback.stop();
+    cancelZap(); abortRequests(); playback.stop();
+    categoryCache = {}; startupPending = false;
     setFullscreen(false); credentials = null; selected = null; channels = []; categories = [];
+    currentCategory = null; selectedCategory = null;
     el('categories').textContent = ''; renderChannels();
     text('channel-title', 'Elige un canal');
     text('playback-status', 'Selecciona un canal y presiona OK para reproducir.');
@@ -220,18 +377,22 @@
   el('logout').onclick = logout;
   el('fullscreen').onclick = function () { setFullscreen(true); };
   el('leave-fullscreen').onclick = function () { setFullscreen(false); };
-  el('retry').onclick = function () { if (selected) selectChannel(selected); };
+  el('retry').onclick = function () { if (selected) selectChannel(selected, true); };
   el('previous-page').onclick = function () { if (page > 0) { page -= 1; renderChannels(); focus(el('channels').firstChild); } };
   el('next-page').onclick = function () { if ((page + 1) * pageSize < channels.length) { page += 1; renderChannels(); focus(el('channels').firstChild); } };
   el('cancel-exit').onclick = closeExit;
   el('confirm-exit').onclick = function () {
-    abortRequests(); loginSequence += 1; playback.stop(); credentials = null; el('password').value = '';
+    cancelZap(); abortRequests(); loginSequence += 1; playback.stop(); categoryCache = {}; startupPending = false;
+    credentials = null; el('password').value = '';
     platform.exit();
   };
   document.addEventListener('keydown', function (event) {
     var code = event.keyCode || event.which, action = platform.keyAction(code);
     if (action === 'back' || code === 27) { event.preventDefault(); back(); return; }
     if (dialogOpen && action) { event.preventDefault(); return; }
+    if (fullscreen && !dialogOpen && (code === 37 || code === 39)) {
+      event.preventDefault(); stepFullscreenChannel(code === 39 ? 1 : -1); return;
+    }
     if (action === 'next' || action === 'previous') {
       event.preventDefault(); zap(action === 'next' ? 1 : -1); return;
     }
@@ -246,7 +407,9 @@
   });
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
+      cancelZap();
       abortRequests(); loginSequence += 1; loginBusy = false; el('login-button').disabled = false;
+      startupPending = false;
       playback.stop();
       if (selected) {
         playbackState = 'idle';
@@ -255,7 +418,9 @@
       }
     } else { positionPlayer(); showOverlay(); }
   });
-  window.addEventListener('pagehide', function () { abortRequests(); playback.stop(); credentials = null; });
+  window.addEventListener('pagehide', function () {
+    cancelZap(); abortRequests(); playback.stop(); categoryCache = {}; startupPending = false; credentials = null;
+  });
   window.addEventListener('resize', positionPlayer);
   platform.init(); text('platform-label', platform.label);
   hide('media-slot', true); focus(el('username'));

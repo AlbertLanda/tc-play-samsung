@@ -1,7 +1,116 @@
 (function (root) {
   'use strict';
+  var readDiagnostics = function () { return { state: 'NONE', events: [] }; };
+  function createHtml5Player(video) {
+    var generation = 0, listeners = [], state = 'NONE', buffering = false;
+    var started = Date.now(), events = [], bufferCount = 0, bufferMs = 0, bufferSince = null;
+    var lastTime = null, progressAt = null;
+    function record(event, value) {
+      var item = { atMs: Date.now() - started, event: event };
+      if (typeof value === 'number' && isFinite(value)) item.value = value;
+      events.push(item); if (events.length > 30) events.shift();
+    }
+    function finishBuffer() {
+      if (bufferSince !== null) bufferMs += Date.now() - bufferSince;
+      bufferSince = null; buffering = false;
+    }
+    function stop() {
+      generation += 1; finishBuffer(); state = 'NONE';
+      listeners.forEach(function (entry) { video.removeEventListener(entry[0], entry[1]); });
+      listeners = [];
+      video.pause(); video.removeAttribute('src'); video.load(); video.style.display = 'none';
+      record('close');
+    }
+    document.body.appendChild(video);
+    video.controls = false; video.loop = false; video.preload = 'auto'; video.style.display = 'none';
+    readDiagnostics = function () {
+      var bounds = video.getBoundingClientRect(), ahead = null, ranges = 0, quality = null, support = '';
+      try {
+        ranges = video.buffered.length;
+        if (ranges) ahead = 0;
+        for (var i = 0; i < video.buffered.length; i += 1) {
+          if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) {
+            ahead = Math.round((video.buffered.end(i) - video.currentTime) * 1000); break;
+          }
+        }
+        support = video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL');
+        if (video.getVideoPlaybackQuality) {
+          var sample = video.getVideoPlaybackQuality();
+          if (typeof sample.totalVideoFrames === 'number' && sample.totalVideoFrames > 0 && isFinite(sample.totalVideoFrames) &&
+              typeof sample.droppedVideoFrames === 'number' && isFinite(sample.droppedVideoFrames)) {
+            quality = { totalFrames: sample.totalVideoFrames, droppedFrames: sample.droppedVideoFrames };
+          }
+        }
+      } catch (ignore) {}
+      return {
+        state: state, engine: 'html5', renderer: 'html5-contain', viewport: [root.innerWidth, root.innerHeight],
+        objectRect: [bounds.left, bounds.top, bounds.width, bounds.height],
+        sourceSize: [video.videoWidth, video.videoHeight], displayMode: 'contain',
+        hlsSupport: support === 'probably' || support === 'maybe' ? support : '',
+        readyState: video.readyState, networkState: video.networkState, bufferedRangeCount: ranges, bufferedAheadMs: ahead,
+        frameQuality: quality, buffering: buffering, bufferingCount: bufferCount,
+        bufferingMs: bufferMs + (bufferSince === null ? 0 : Date.now() - bufferSince),
+        playbackTimeMs: Math.round(video.currentTime * 1000),
+        lastProgressAgeMs: progressAt === null ? null : Date.now() - progressAt,
+        events: events.map(function (item) {
+          var copy = { atMs: item.atMs, event: item.event };
+          if (typeof item.value === 'number') copy.value = item.value;
+          return copy;
+        })
+      };
+    };
+    return {
+      play: function (url, callbacks) {
+        stop(); started = Date.now(); events = []; bufferCount = 0; bufferMs = 0;
+        lastTime = null; progressAt = null; state = 'IDLE';
+        var ticket = generation;
+        function current() { return ticket === generation; }
+        function listen(name, callback) {
+          var handler = function () { if (current()) callback(); };
+          listeners.push([name, handler]); video.addEventListener(name, handler);
+        }
+        function fail(event) {
+          if (!current()) return;
+          state = 'ERROR'; record(event, video.error && video.error.code); callbacks.error();
+        }
+        listen('loadedmetadata', function () { record('loaded_metadata'); });
+        listen('playing', function () {
+          finishBuffer(); state = 'PLAYING'; record('playing'); callbacks.ready();
+        });
+        listen('waiting', function () {
+          if (!buffering) { bufferCount += 1; bufferSince = Date.now(); }
+          buffering = true; record('waiting'); callbacks.buffering();
+        });
+        // stalled describes resource fetching; buffered playback may still continue.
+        listen('stalled', function () { record('stalled'); });
+        listen('timeupdate', function () {
+          if (lastTime === null || video.currentTime > lastTime) progressAt = Date.now();
+          lastTime = video.currentTime;
+        });
+        listen('error', function () { fail('media_error'); });
+        listen('ended', function () { state = 'ENDED'; record('stream_complete'); callbacks.ended(); });
+        video.style.display = 'block';
+        try {
+          video.src = url; video.load(); record('open');
+          var result = video.play();
+          if (result && result.catch) result.catch(function () { fail('play_rejected'); });
+        } catch (ignore) { fail('play_failed'); }
+      },
+      stop: stop,
+      setRect: function (rect) {
+        video.style.left = rect.left + 'px'; video.style.top = rect.top + 'px';
+        video.style.width = rect.width + 'px'; video.style.height = rect.height + 'px';
+        video.width = Math.max(1, Math.round(rect.width)); video.height = Math.max(1, Math.round(rect.height));
+      }
+    };
+  }
   root.TCPlayPlatform = {
     label: 'Samsung · Tizen',
+    getPlaybackDiagnostics: function () {
+      var result = readDiagnostics();
+      if (root.TCPlayApp) result.channelSwitch = root.TCPlayApp.getChannelSwitchDiagnostics();
+      return result;
+    },
     init: function () {
       if (!root.tizen || !root.tizen.tvinputdevice) return;
       ['ChannelUp', 'ChannelDown'].forEach(function (key) {
@@ -16,49 +125,124 @@
       else root.close();
     },
     createPlayer: function (video, slot) {
+      if ((root.TCPLAY_CONFIG || {}).playerEngine === 'html5') return createHtml5Player(video);
       var av = root.webapis && root.webapis.avplay;
-      var generation = 0, rectangle = [0, 0, 1920, 1080], object;
+      var generation = 0, rectangle = [0, 0, 1920, 1080], appliedRectangle = null, object, buffering = false;
+      var mode = 'PLAYER_DISPLAY_MODE_LETTER_BOX', started = Date.now(), events = [];
+      var bufferCount = 0, bufferSince = null, bufferMs = 0, playTime = null, progressAt = null;
+      function record(event, value) {
+        var item = { atMs: Date.now() - started, event: event };
+        if (typeof value === 'number' && isFinite(value)) item.value = value;
+        events.push(item);
+        if (events.length > 30) events.shift();
+      }
+      function failure(event, error) {
+        var code = typeof error === 'string' ? error : error && error.name;
+        var known = ['InvalidStateError', 'InvalidValuesError', 'TypeMismatchError', 'NotSupportedError',
+          'InvalidAccessError', 'UnknownError', 'PLAYER_ERROR_NONE', 'PLAYER_ERROR_INVALID_PARAMETER',
+          'PLAYER_ERROR_NO_SUCH_FILE', 'PLAYER_ERROR_INVALID_OPERATION', 'PLAYER_ERROR_SEEK_FAILED',
+          'PLAYER_ERROR_INVALID_STATE', 'PLAYER_ERROR_NOT_SUPPORTED_FILE', 'PLAYER_ERROR_NOT_SUPPORTED_FORMAT',
+          'PLAYER_ERROR_INVALID_URI', 'PLAYER_ERROR_CONNECTION_FAILED', 'PLAYER_ERROR_GENEREIC'];
+        record(event);
+        if (known.indexOf(code) >= 0) events[events.length - 1].code = code;
+      }
+      readDiagnostics = function () {
+        var state = 'NONE', bounds = object.getBoundingClientRect();
+        try { if (av) state = av.getState(); } catch (ignore) {}
+        if (['NONE', 'IDLE', 'READY', 'PLAYING', 'PAUSED'].indexOf(state) < 0) state = 'UNKNOWN';
+        // Only explicit numeric data and internal event names: no stream URLs or raw native errors.
+        return {
+          state: state, engine: 'avplay', renderer: 'screen-positioned-object',
+          viewport: [root.innerWidth, root.innerHeight],
+          objectRect: [bounds.left, bounds.top, bounds.width, bounds.height],
+          displayRect: rectangle.slice(), appliedDisplayRect: appliedRectangle && appliedRectangle.slice(), displayMode: mode,
+          buffering: buffering, bufferingCount: bufferCount,
+          bufferingMs: bufferMs + (bufferSince === null ? 0 : Date.now() - bufferSince),
+          playbackTimeMs: playTime, lastProgressAgeMs: progressAt === null ? null : Date.now() - progressAt,
+          events: events.map(function (item) {
+            var copy = { atMs: item.atMs, event: item.event };
+            if (typeof item.value === 'number') copy.value = item.value;
+            if (item.code) copy.code = item.code;
+            return copy;
+          })
+        };
+      };
       video.style.display = 'none';
       object = document.createElement('object');
-      object.id = 'native-player'; object.type = 'application/avplayer'; slot.appendChild(object);
+      object.id = 'native-player'; object.type = 'application/avplayer';
+      // Match Samsung's screen-positioned object, outside the positioned preview parent.
+      object.style.display = 'none'; document.body.appendChild(object);
       function stop() {
         generation += 1;
-        if (!av) return;
-        try { av.close(); } catch (ignore) {}
+        if (bufferSince !== null) bufferMs += Date.now() - bufferSince;
+        bufferSince = null; buffering = false;
+        record('close');
+        if (av) { try { av.close(); } catch (ignore) {} }
+        object.style.display = 'none';
+      }
+      function display() {
+        av.setDisplayRect.apply(av, rectangle);
+        appliedRectangle = rectangle.slice();
+        av.setDisplayMethod(mode);
       }
       return {
         play: function (url, callbacks) {
           stop();
+          started = Date.now(); events = []; bufferCount = 0; bufferMs = 0;
+          playTime = null; progressAt = null; appliedRectangle = null;
           var ticket = generation;
           function current() { return ticket === generation; }
-          if (!av) { callbacks.error(); return; }
+          if (!av) { failure('avplay_unavailable'); callbacks.error(); return; }
+          object.style.display = 'block';
           try {
             av.open(url);
+            record('open');
             av.setListener({
-              onbufferingstart: function () { if (current()) callbacks.buffering(); },
-              onbufferingcomplete: function () {
-                if (current() && av.getState() === 'PLAYING') callbacks.ready();
+              onbufferingstart: function () {
+                if (!current()) return;
+                if (!buffering) { bufferCount += 1; bufferSince = Date.now(); }
+                buffering = true; record('buffering_start'); callbacks.buffering();
               },
-              oncurrentplaytime: function () { if (current()) callbacks.ready(); },
-              onerror: function () { if (current()) callbacks.error(); },
-              onstreamcompleted: function () { if (current()) callbacks.ended(); }
+              onbufferingprogress: function (percent) { if (current()) record('buffering_progress', percent); },
+              onbufferingcomplete: function () {
+                if (!current()) return;
+                if (bufferSince !== null) bufferMs += Date.now() - bufferSince;
+                bufferSince = null; buffering = false; record('buffering_complete');
+                if (av.getState() === 'PLAYING') callbacks.ready();
+              },
+              oncurrentplaytime: function (time) {
+                if (!current()) return;
+                if (typeof time === 'number' && isFinite(time)) {
+                  if (playTime === null || time > playTime) progressAt = Date.now();
+                  playTime = time;
+                }
+                if (!buffering) callbacks.ready();
+              },
+              onerror: function (error) { if (current()) { failure('native_error', error); callbacks.error(); } },
+              onstreamcompleted: function () { if (current()) { record('stream_complete'); callbacks.ended(); } }
             });
-            av.setDisplayRect.apply(av, rectangle);
+            display();
             av.prepareAsync(function () {
               if (!current()) return;
               try {
-                av.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX');
+                // Apply the latest rectangle if fullscreen changed during preparation.
+                display(); record('prepared');
                 av.play();
-              } catch (ignore) { callbacks.error(); }
-            }, function () { if (current()) callbacks.error(); });
-          } catch (ignore) { if (current()) callbacks.error(); }
+                record('play');
+              } catch (error) { failure('play_failed', error); callbacks.error(); }
+            }, function (error) { if (current()) { failure('prepare_failed', error); callbacks.error(); } });
+          } catch (error) { if (current()) { failure('open_or_setup_failed', error); callbacks.error(); } }
         },
         stop: stop,
         setRect: function (rect, width, height) {
+          // CSS coordinates are relative to the screen; AVPlay uses its 1920x1080 plane.
+          object.style.left = rect.left + 'px'; object.style.top = rect.top + 'px';
+          object.style.width = rect.width + 'px'; object.style.height = rect.height + 'px';
           rectangle = [Math.round(rect.left * 1920 / width), Math.round(rect.top * 1080 / height),
             Math.max(1, Math.round(rect.width * 1920 / width)), Math.max(1, Math.round(rect.height * 1080 / height))];
           if (!av) return;
-          try { if (av.getState() !== 'NONE') av.setDisplayRect.apply(av, rectangle); } catch (ignore) {}
+          try { if (av.getState() !== 'NONE') { display(); record('display_updated'); } }
+          catch (error) { failure('display_update_failed', error); }
         }
       };
     }
